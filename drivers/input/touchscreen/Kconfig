@@ -30,6 +30,17 @@ config TOUCHSCREEN_88PM860X
 	  To compile this driver as a module, choose M here: the
 	  module will be called 88pm860x-ts.
 
+config TOUCHSCREEN_FT5436
+ 	bool "Goodix touchpanel FT5436 series"
+ 	depends on I2C
+ 	help
+ 	  Say Y here if you have a FocalTech FT54xx touchscreen.
+ 	  Gt915L controllers are multi touch controllers which can
+ 	  report 5 touches at a time.
+ 
+           If unsure, say N.
+ 
+
 config TOUCHSCREEN_ADS7846
 	tristate "ADS7846/TSC2046/AD7873 and AD(S)7843 based touchscreens"
 	depends on SPI_MASTER
@@ -1127,6 +1138,7 @@ config TOUCHSCREEN_MAXIM_STI
 	  module will be called maxim_sti.
 
 source "drivers/input/touchscreen/gt9xx/Kconfig"
+source "drivers/input/touchscreen/ft5436/Kconfig"
 config TOUCHSCREEN_FT5X46
        tristate "FocalTech touchscreens"
        depends on I2C
