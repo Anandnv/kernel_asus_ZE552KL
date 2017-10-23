@@ -3833,8 +3833,8 @@ static int mdss_mdp_hw_cursor_pipe_update(struct msm_fb_data_type *mfd,
 	roi.h = min(yres - start_y, img->height - roi.y);
 
 	if ((roi.w > mdata->max_cursor_size) ||
-		(roi.h > mdata->max_cursor_size)) {
-		pr_err("Invalid cursor ROI size\n");
+		(roi.h > mdata->max_cursor_size) ||
+		(img->depth != 32) || (start_x >= xres) || (start_y >= yres)) {
 		ret = -EINVAL;
 		goto done;
 	}
