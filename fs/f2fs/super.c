@@ -827,7 +827,6 @@ static int sanity_check_raw_super(struct super_block *sb,
 			le32_to_cpu(raw_super->log_sectorsize));
 		return 1;
 	}
-
 	if (le32_to_cpu(raw_super->segment_count) > F2FS_MAX_SEGMENT) {
 		f2fs_msg(sb, KERN_INFO,
 			"Invalid segment count (%u)",
@@ -854,7 +853,6 @@ static int sanity_check_ckpt(struct f2fs_sb_info *sbi)
 
 	if (unlikely(fsmeta >= total))
 		return 1;
-
 	main_segs = le32_to_cpu(sbi->raw_super->segment_count_main);
 	blocks_per_seg = sbi->blocks_per_seg;
 

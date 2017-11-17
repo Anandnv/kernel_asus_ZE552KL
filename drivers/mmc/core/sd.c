@@ -465,6 +465,9 @@ static void sd_update_bus_speed_mode(struct mmc_card *card)
 		return;
 	}
 
+	printk("[SD] card->host->caps 0x%x\n", card->host->caps);
+	printk("[SD] card->sw_caps.sd3_bus_mode 0x%x\n", card->sw_caps.sd3_bus_mode);
+
 	if ((card->host->caps & MMC_CAP_UHS_SDR104) &&
 	    (card->sw_caps.sd3_bus_mode & SD_MODE_UHS_SDR104) &&
 	    (card->host->f_max > UHS_SDR104_MIN_DTR)) {
@@ -489,6 +492,7 @@ static void sd_update_bus_speed_mode(struct mmc_card *card)
 		    SD_MODE_UHS_SDR12)) {
 			card->sd_bus_speed = UHS_SDR12_BUS_SPEED;
 	}
+	printk("[SD] card->sd_bus_speed %d\n", card->sd_bus_speed);
 }
 
 static int sd_set_bus_speed_mode(struct mmc_card *card, u8 *status)
@@ -682,6 +686,7 @@ static int mmc_sd_init_uhs_card(struct mmc_card *card)
 	int err;
 	u8 *status;
 
+	printk("[SD] mmc_sd_init_uhs_card\n");
 	if (!card->scr.sda_spec3)
 		return 0;
 
@@ -1005,6 +1010,7 @@ static int mmc_sd_init_card(struct mmc_host *host, u32 ocr,
 	BUG_ON(!host);
 	WARN_ON(!host->claimed);
 
+	printk("[SD] mmc_sd_init_card\n");
 	err = mmc_sd_get_cid(host, ocr, cid, &rocr);
 	if (err)
 		return err;
@@ -1074,6 +1080,7 @@ static int mmc_sd_init_card(struct mmc_host *host, u32 ocr,
 		/*
 		 * Attempt to change to high-speed (if supported)
 		 */
+		printk("[SD] mmc_card_set_highspeed \n");
 		err = mmc_sd_switch_hs(card);
 		if (err > 0)
 			mmc_set_timing(card->host, MMC_TIMING_SD_HS);
@@ -1224,16 +1231,11 @@ static int mmc_sd_suspend(struct mmc_host *host)
 {
 	int err;
 
-	MMC_TRACE(host, "%s: Enter\n", __func__);
 	err = _mmc_sd_suspend(host);
 	if (!err) {
 		pm_runtime_disable(&host->card->dev);
 		pm_runtime_set_suspended(&host->card->dev);
-	/* if suspend fails, force mmc_detect_change during resume */
-	} else if (mmc_bus_manual_resume(host))
-		host->ignore_bus_resume_flags = true;
-
-	MMC_TRACE(host, "%s: Exit err: %d\n", __func__, err);
+	}
 
 	return err;
 }
@@ -1278,11 +1280,6 @@ static int _mmc_sd_resume(struct mmc_host *host)
 #else
 	err = mmc_sd_init_card(host, host->card->ocr, host->card);
 #endif
-	if (err) {
-		pr_err("%s: %s: mmc_sd_init_card_failed (%d)\n",
-				mmc_hostname(host), __func__, err);
-		goto out;
-	}
 	mmc_card_clr_suspended(host->card);
 
 	err = mmc_resume_clk_scaling(host);
@@ -1304,14 +1301,12 @@ static int mmc_sd_resume(struct mmc_host *host)
 {
 	int err = 0;
 
-	MMC_TRACE(host, "%s: Enter\n", __func__);
 	if (!(host->caps & MMC_CAP_RUNTIME_RESUME)) {
 		err = _mmc_sd_resume(host);
 		pm_runtime_set_active(&host->card->dev);
 		pm_runtime_mark_last_busy(&host->card->dev);
 	}
 	pm_runtime_enable(&host->card->dev);
-	MMC_TRACE(host, "%s: Exit err: %d\n", __func__, err);
 
 	return err;
 }
@@ -1367,11 +1362,6 @@ static int mmc_sd_power_restore(struct mmc_host *host)
 	mmc_claim_host(host);
 	ret = mmc_sd_init_card(host, host->card->ocr, host->card);
 	mmc_release_host(host);
-	if (ret) {
-		pr_err("%s: %s: mmc_sd_init_card_failed (%d)\n",
-				mmc_hostname(host), __func__, ret);
-		return ret;
-	}
 
 	ret = mmc_resume_clk_scaling(host);
 	if (ret)

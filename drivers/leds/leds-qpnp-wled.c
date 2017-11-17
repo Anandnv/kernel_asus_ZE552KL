@@ -50,6 +50,8 @@
 #define QPNP_WLED_TEST1_REG(b)		(b + 0xE2)
 #define QPNP_WLED_TEST4_REG(b)		(b + 0xE5)
 #define QPNP_WLED_REF_7P7_TRIM_REG(b)	(b + 0xF2)
+/*ASUS_BSP+++*/
+#define QPNP_WLED_SWITCH_SLEW_RATE(b)	(b + 0x54)
 
 #define QPNP_WLED_7P7_TRIM_MASK		0xF
 #define QPNP_WLED_EN_MASK		0x7F
@@ -94,7 +96,7 @@
 #define QPNP_WLED_SWITCH_FREQ_800_KHZ	800
 #define QPNP_WLED_SWITCH_FREQ_1600_KHZ	1600
 #define QPNP_WLED_SWITCH_FREQ_OVERWRITE 0x80
-#define QPNP_WLED_OVP_MASK		GENMASK(1, 0)
+#define QPNP_WLED_OVP_MASK		0xFC
 #define QPNP_WLED_OVP_17800_MV		17800
 #define QPNP_WLED_OVP_19400_MV		19400
 #define QPNP_WLED_OVP_29500_MV		29500
@@ -1100,28 +1102,31 @@ static int qpnp_wled_config(struct qpnp_wled *wled)
 	if (rc)
 		return rc;
 
-	/* Configure the OVP register only if display type is not AMOLED */
-	if (!wled->disp_type_amoled) {
-		if (wled->ovp_mv <= QPNP_WLED_OVP_17800_MV) {
-			wled->ovp_mv = QPNP_WLED_OVP_17800_MV;
-			temp = 3;
-		} else if (wled->ovp_mv <= QPNP_WLED_OVP_19400_MV) {
-			wled->ovp_mv = QPNP_WLED_OVP_19400_MV;
-			temp = 2;
-		} else if (wled->ovp_mv <= QPNP_WLED_OVP_29500_MV) {
-			wled->ovp_mv = QPNP_WLED_OVP_29500_MV;
-			temp = 1;
-		} else {
-			wled->ovp_mv = QPNP_WLED_OVP_31000_MV;
-			temp = 0;
-		}
-
-		reg = (u8)temp;
-		rc = qpnp_wled_masked_write_reg(wled, QPNP_WLED_OVP_MASK, &reg,
-				QPNP_WLED_OVP_REG(wled->ctrl_base));
-		if (rc)
-			return rc;
+	/* Configure the OVP register */
+	if (wled->ovp_mv <= QPNP_WLED_OVP_17800_MV) {
+		wled->ovp_mv = QPNP_WLED_OVP_17800_MV;
+		temp = 3;
+	} else if (wled->ovp_mv <= QPNP_WLED_OVP_19400_MV) {
+		wled->ovp_mv = QPNP_WLED_OVP_19400_MV;
+		temp = 2;
+	} else if (wled->ovp_mv <= QPNP_WLED_OVP_29500_MV) {
+		wled->ovp_mv = QPNP_WLED_OVP_29500_MV;
+		temp = 1;
+	} else {
+		wled->ovp_mv = QPNP_WLED_OVP_31000_MV;
+		temp = 0;
 	}
+
+	rc = qpnp_wled_read_reg(wled, &reg,
+			QPNP_WLED_OVP_REG(wled->ctrl_base));
+	if (rc < 0)
+		return rc;
+	reg &= QPNP_WLED_OVP_MASK;
+	reg |= temp;
+	rc = qpnp_wled_write_reg(wled, &reg,
+			QPNP_WLED_OVP_REG(wled->ctrl_base));
+	if (rc)
+		return rc;
 
 	rc = qpnp_wled_read_reg(wled, &reg,
 			QPNP_WLED_CTRL_SPARE_REG(wled->ctrl_base));
@@ -1147,8 +1152,8 @@ static int qpnp_wled_config(struct qpnp_wled *wled)
 
 		/* Update WLED_OVP register based on desired target voltage */
 		reg = qpnp_wled_ovp_reg_settings[i];
-		rc = qpnp_wled_masked_write_reg(wled, QPNP_WLED_OVP_MASK, &reg,
-				QPNP_WLED_OVP_REG(wled->ctrl_base));
+		rc = qpnp_wled_write_reg(wled, &reg,
+			QPNP_WLED_OVP_REG(wled->ctrl_base));
 		if (rc)
 			return rc;
 
@@ -1175,6 +1180,12 @@ static int qpnp_wled_config(struct qpnp_wled *wled)
 			&reg, QPNP_WLED_REF_7P7_TRIM_REG(wled->ctrl_base));
 		if (rc)
 			return rc;
+	}
+
+	if (g_ASUS_hwID >= ZE520KL_EVB && g_ASUS_hwID < ZE552KL_UNKNOWN) {
+		reg = 0x01;
+		rc = qpnp_wled_write_reg(wled, &reg,
+			QPNP_WLED_SWITCH_SLEW_RATE(wled->ctrl_base));
 	}
 
 	/* Configure the MODULATION register */
@@ -1450,6 +1461,7 @@ static int qpnp_wled_parse_dt(struct qpnp_wled *wled)
 	u32 temp_val;
 	int rc, i;
 	u8 *strings;
+	char temp_prop[30];
 
 	wled->cdev.name = "wled";
 	rc = of_property_read_string(spmi->dev.of_node,
@@ -1571,7 +1583,7 @@ static int qpnp_wled_parse_dt(struct qpnp_wled *wled)
 	if (!rc) {
 		wled->ovp_mv = temp_val;
 	} else if (rc != -EINVAL) {
-		dev_err(&spmi->dev, "Unable to read ovp\n");
+		dev_err(&spmi->dev, "Unable to read vref\n");
 		return rc;
 	}
 
@@ -1651,6 +1663,12 @@ static int qpnp_wled_parse_dt(struct qpnp_wled *wled)
 		dev_err(&spmi->dev, "Unable to read full scale current\n");
 		return rc;
 	}
+
+	sprintf(temp_prop, "qcom,fs-curr-ua-%d", g_asus_lcdID);
+	rc = of_property_read_u32(spmi->dev.of_node,
+			temp_prop, &temp_val);
+	if (!rc)
+		wled->fs_curr_ua = temp_val;
 
 	wled->cons_sync_write_delay_us = 0;
 	rc = of_property_read_u32(spmi->dev.of_node,

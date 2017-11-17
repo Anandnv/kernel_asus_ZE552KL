@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -25,6 +25,11 @@
 #include <linux/delay.h>
 #include <linux/qpnp/qpnp-haptic.h>
 #include "../../staging/android/timed_output.h"
+
+#define ZE552KL_HAP_VMAX_MV		900
+#define ZE520KL_HAP_VMAX_MV		1100
+#define ZE552KL_HAP_BRAKE		{0x3, 0x3, 0x3, 0x3}
+#define ZE520KL_HAP_BRAKE		{0x0, 0x0, 0x0, 0x0}
 
 #define QPNP_IRQ_FLAGS	(IRQF_TRIGGER_RISING | \
 			IRQF_TRIGGER_FALLING | \
@@ -133,7 +138,7 @@
 #define SC_FOUND_BIT			0x08
 #define SC_MAX_DURATION			5
 
-#define QPNP_HAP_TIMEOUT_MS_MAX		15000
+#define QPNP_HAP_TIMEOUT_MS_MAX		60000
 #define QPNP_HAP_STR_SIZE		20
 #define QPNP_HAP_MAX_RETRIES		5
 #define QPNP_HAP_CYCLS			5
@@ -164,6 +169,15 @@
 					(1000 - rc_clk_err_percent_x10)) / 1000)
 
 u32 adjusted_lra_play_rate_code[ADJUSTED_LRA_PLAY_RATE_CODE_ARRSIZE];
+
+static int ze552kl_vmax_array[] = {
+	300, 600, 900, 1200, 1500, 1800, 1800
+};
+
+
+static int ze520kl_vmax_array[] = {
+	300, 600, 900, 1200, 1500, 1800, 1800
+};
 
 /* haptic debug register set */
 static u8 qpnp_hap_dbg_regs[] = {
@@ -350,7 +364,6 @@ struct qpnp_hap {
 	u8 lra_res_cal_period;
 	u8 sc_duration;
 	u8 ext_pwm_dtest_line;
-	bool vcc_pon_enabled;
 	bool state;
 	bool use_play_irq;
 	bool use_sc_irq;
@@ -736,9 +749,16 @@ static int qpnp_hap_vmax_config(struct qpnp_hap *hap)
 	rc = qpnp_hap_read_reg(hap, &reg, QPNP_HAP_VMAX_REG(hap->base));
 	if (rc < 0)
 		return rc;
+
 	reg &= QPNP_HAP_VMAX_MASK;
+	printk("[Vibrator] reg=0x%x\n", reg);
+
 	temp = hap->vmax_mv / QPNP_HAP_VMAX_MIN_MV;
+	printk("[Vibrator] temp=0x%x\n", temp);
+	
 	reg |= (temp << QPNP_HAP_VMAX_SHIFT);
+	printk("[Vibrator] reg=0x%x\n", reg);
+
 	rc = qpnp_hap_write_reg(hap, &reg, QPNP_HAP_VMAX_REG(hap->base));
 	if (rc)
 		return rc;
@@ -1322,6 +1342,147 @@ static ssize_t qpnp_hap_ramp_test_data_show(struct device *dev,
 
 }
 
+
+static ssize_t vmax_level_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+        struct timed_output_dev *timed_dev = dev_get_drvdata(dev);
+        struct qpnp_hap *hap = container_of(timed_dev, struct qpnp_hap,
+                                         timed_dev);
+        int value;
+
+        if (sscanf(buf, "%d", &value) != 1)
+                return -EINVAL;
+
+	
+	if(value < 0) {
+		printk("[Vibrator] config vmax_level error level: %d\n", value);
+		return -EINVAL;
+	}
+
+        if(g_ASUS_hwID < ZE520KL_EVB) {
+        	if(value > sizeof(ze552kl_vmax_array)/sizeof(int)) {
+			printk("[Vibrator] config vmax_level error value: %d\n", value);
+                	return -EINVAL;
+		}
+		hap->vmax_mv = ze552kl_vmax_array[value];
+        }
+        else if(g_ASUS_hwID < ZE552KL_UNKNOWN) {
+        	if(value > sizeof(ze520kl_vmax_array)/sizeof(int)) {
+			printk("[Vibrator] config vmax_level error value: %d\n", value);
+			return -EINVAL;
+		}
+	        hap->vmax_mv = ze520kl_vmax_array[value];
+        }
+        else {
+		printk("[Vibrator] not support this HW to config vmax_level\n");
+	        return -EINVAL;
+        }
+
+	printk("[Vibrator] vmax: %d, level: %d\n",hap->vmax_mv, value);
+
+        if(qpnp_hap_vmax_config(hap)) {
+                printk("[Vibrator] config vmax_level failed\n");
+        }
+
+	return count;
+}
+
+static ssize_t vmax_show(struct device *dev, 
+		struct device_attribute *attr, char *buf)
+{
+	struct timed_output_dev *timed_dev = dev_get_drvdata(dev);
+	struct qpnp_hap *hap = container_of(timed_dev, struct qpnp_hap, 
+					timed_dev);
+	u8 val;
+	int mv, rc;
+
+	rc = qpnp_hap_read_reg(hap, &val, QPNP_HAP_VMAX_REG(hap->base));
+	if (rc < 0)
+		return rc;
+
+	mv = (val >> QPNP_HAP_VMAX_SHIFT) * QPNP_HAP_VMAX_MIN_MV; //approximate value
+
+	return snprintf(buf, PAGE_SIZE, "reg=0x%x, %dmv\n", val, mv);
+}
+
+static ssize_t vmax_store(struct device *dev, 
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct timed_output_dev *timed_dev = dev_get_drvdata(dev);
+	struct qpnp_hap *hap = container_of(timed_dev, struct qpnp_hap, 
+					timed_dev);
+	int rc, data;
+
+	if (sscanf(buf, "%d", &data) != 1)
+		return -EINVAL;
+
+	hap->vmax_mv = data;
+
+	rc = qpnp_hap_vmax_config(hap);
+	if (rc){
+		printk("[Vibrator] vmax_store failed...\n");
+	}
+
+	return count;
+}
+
+static ssize_t wave_show(struct device *dev, 
+		struct device_attribute *attr, char *buf)
+{
+        struct timed_output_dev *timed_dev = dev_get_drvdata(dev);
+        struct qpnp_hap *hap = container_of(timed_dev, struct qpnp_hap, 
+					timed_dev);
+        u8 val;
+        int rc;
+
+        rc = qpnp_hap_read_reg(hap, &val, 
+			QPNP_HAP_WAV_SHAPE_REG(hap->base));
+        if (rc < 0)
+                return rc;
+
+        return snprintf(buf, PAGE_SIZE, "reg=0x%x\n", val);
+}
+
+static ssize_t wave_store(struct device *dev, 
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+        struct timed_output_dev *timed_dev = dev_get_drvdata(dev);
+        struct qpnp_hap *hap = container_of(timed_dev, struct qpnp_hap, 
+					timed_dev);
+	u8 reg = 0;
+	int rc, data;
+        
+        if (sscanf(buf, "%d", &data) != 1)
+                return -EINVAL;
+
+        if (data == 0)
+                hap->wave_shape = QPNP_HAP_WAV_SINE;
+        else if (data == 1)
+                hap->wave_shape = QPNP_HAP_WAV_SQUARE;
+        else {
+                printk("[Vibrator] Unsupported wav shape\n");
+                return -EINVAL;
+        }
+        printk("[Vibrator] qcom,wave-shape = %s\n",
+                        hap->wave_shape ? "Square" : "Sine");
+
+        rc = qpnp_hap_read_reg(hap, &reg,
+                        QPNP_HAP_WAV_SHAPE_REG(hap->base));
+        if (rc < 0)
+                return rc;
+
+        reg &= QPNP_HAP_WAV_SHAPE_MASK;
+        reg |= hap->wave_shape;
+        rc = qpnp_hap_write_reg(hap, &reg,
+                        QPNP_HAP_WAV_SHAPE_REG(hap->base));
+        if (rc < 0)
+		return rc;
+
+        return count;
+}
+
+
 /* sysfs attributes */
 static struct device_attribute qpnp_hap_attrs[] = {
 	__ATTR(wf_s0, (S_IRUGO | S_IWUSR | S_IWGRP),
@@ -1369,6 +1530,15 @@ static struct device_attribute qpnp_hap_attrs[] = {
 	__ATTR(min_max_test, (S_IRUGO | S_IWUSR | S_IWGRP),
 			qpnp_hap_min_max_test_data_show,
 			qpnp_hap_min_max_test_data_store),
+        __ATTR(wave, (S_IRUGO | S_IWUSR | S_IWGRP),
+                        wave_show,
+                        wave_store),
+        __ATTR(vmax_level, (S_IRUGO | S_IWUSR | S_IWGRP),
+                        NULL,
+                        vmax_level_store),
+	__ATTR(vmax, (S_IRUGO | S_IWUSR | S_IWGRP),
+			vmax_show,
+			vmax_store)
 };
 
 static int calculate_lra_code(struct qpnp_hap *hap)
@@ -1737,15 +1907,13 @@ static void qpnp_hap_worker(struct work_struct *work)
 	struct qpnp_hap *hap = container_of(work, struct qpnp_hap,
 					 work);
 	u8 val = 0x00;
-	int rc;
+	int rc, reg_en;
 
-	if (hap->vcc_pon && hap->state && !hap->vcc_pon_enabled) {
-		rc = regulator_enable(hap->vcc_pon);
-		if (rc < 0)
-			pr_err("%s: could not enable vcc_pon regulator rc=%d\n",
-				 __func__, rc);
-		else
-			hap->vcc_pon_enabled = true;
+	if (hap->vcc_pon) {
+		reg_en = regulator_enable(hap->vcc_pon);
+		if (reg_en)
+			pr_err("%s: could not enable vcc_pon regulator\n",
+				 __func__);
 	}
 
 	/* Disable haptics module if the duration of short circuit
@@ -1760,13 +1928,11 @@ static void qpnp_hap_worker(struct work_struct *work)
 		qpnp_hap_set(hap, hap->state);
 	}
 
-	if (hap->vcc_pon && !hap->state && hap->vcc_pon_enabled) {
+	if (hap->vcc_pon && !reg_en) {
 		rc = regulator_disable(hap->vcc_pon);
 		if (rc)
-			pr_err("%s: could not disable vcc_pon regulator rc=%d\n",
-				 __func__, rc);
-		else
-			hap->vcc_pon_enabled = false;
+			pr_err("%s: could not disable vcc_pon regulator\n",
+				 __func__);
 	}
 }
 
@@ -2126,6 +2292,7 @@ static int qpnp_hap_parse_dt(struct qpnp_hap *hap)
 			"qcom,timeout-ms", &temp);
 	if (!rc) {
 		hap->timeout_ms = temp;
+		printk("[Vibrator] qcom,vmax-mv = %u\n", hap->vmax_mv);
 	} else if (rc != -EINVAL) {
 		dev_err(&spmi->dev, "Unable to read timeout\n");
 		return rc;
@@ -2259,7 +2426,17 @@ static int qpnp_hap_parse_dt(struct qpnp_hap *hap)
 	rc = of_property_read_u32(spmi->dev.of_node,
 			"qcom,vmax-mv", &temp);
 	if (!rc) {
-		hap->vmax_mv = temp;
+
+		if(g_ASUS_hwID < ZE520KL_EVB) {
+			hap->vmax_mv = ZE552KL_HAP_VMAX_MV;
+		}
+	        else if(g_ASUS_hwID < ZE552KL_UNKNOWN) {
+	                hap->vmax_mv = ZE520KL_HAP_VMAX_MV;
+		}
+		else {
+			hap->vmax_mv = temp;
+		}
+
 	} else if (rc != -EINVAL) {
 		dev_err(&spmi->dev, "Unable to read vmax\n");
 		return rc;
@@ -2311,6 +2488,8 @@ static int qpnp_hap_parse_dt(struct qpnp_hap *hap)
 		dev_err(&spmi->dev, "Unable to read wav shape\n");
 		return rc;
 	}
+	printk("[Vibrator] qcom,wave-shape = %s\n",
+			hap->wave_shape ? "Square" : "Sine");
 
 	hap->wave_play_rate_us = QPNP_HAP_DEF_WAVE_PLAY_RATE_US;
 	rc = of_property_read_u32(spmi->dev.of_node,
@@ -2343,8 +2522,22 @@ static int qpnp_hap_parse_dt(struct qpnp_hap *hap)
 			return -EINVAL;
 		} else {
 			hap->sup_brake_pat = true;
-			memcpy(hap->brake_pat, prop->value,
+
+			if (g_ASUS_hwID < ZE520KL_EVB) {
+				memcpy(hap->brake_pat,
+					(u8[QPNP_HAP_BRAKE_PAT_LEN])ZE552KL_HAP_BRAKE,
 					QPNP_HAP_BRAKE_PAT_LEN);
+	                }
+			else if (g_ASUS_hwID < ZE552KL_UNKNOWN) {
+				memcpy(hap->brake_pat,
+					(u8[QPNP_HAP_BRAKE_PAT_LEN])ZE520KL_HAP_BRAKE,
+					QPNP_HAP_BRAKE_PAT_LEN);
+			}
+			else{
+				memcpy(hap->brake_pat, prop->value,
+					QPNP_HAP_BRAKE_PAT_LEN);
+			}
+
 		}
 	}
 
@@ -2371,6 +2564,8 @@ static int qpnp_haptic_probe(struct spmi_device *spmi)
 	struct resource *hap_resource;
 	struct regulator *vcc_pon;
 	int rc, i;
+
+	printk("[Vibrator] qpnp_haptic_probe +++\n");
 
 	hap = devm_kzalloc(&spmi->dev, sizeof(*hap), GFP_KERNEL);
 	if (!hap)
@@ -2449,6 +2644,8 @@ static int qpnp_haptic_probe(struct spmi_device *spmi)
 	}
 
 	ghap = hap;
+
+	printk("[Vibrator] qpnp_haptic_probe ---\n");
 
 	return 0;
 

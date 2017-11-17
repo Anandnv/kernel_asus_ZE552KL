@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -159,6 +159,7 @@ static bool ocr_nodes_called;
 static bool ocr_probed;
 static bool ocr_reg_init_defer;
 static bool hotplug_enabled;
+static bool interrupt_mode_enable;
 static bool msm_thermal_probed;
 static bool gfx_crit_phase_ctrl_enabled;
 static bool gfx_warm_phase_ctrl_enabled;
@@ -477,6 +478,48 @@ static ssize_t thermal_config_debugfs_write(struct file *file,
 				pr_debug("Remove voting to %s\n", #name);     \
 		}                                                             \
 	} while (0)
+
+/*+++ ASUS_BSP Show: reduce thermal log +++*/
+#define NUM_OF_CPU 8
+#define LOG_SAMPLE_RATE 20
+
+static DEFINE_MUTEX(log_mutex);
+static uint32_t cpu_error;
+static uint8_t cpu_log_count[NUM_OF_CPU];
+			
+static int limit_cpu_error_log(int cpu){
+	if(cpu_error&BIT(cpu)){
+		if(cpu_log_count[cpu] >= LOG_SAMPLE_RATE+1){
+			mutex_lock(&log_mutex);
+			cpu_log_count[cpu] = 1;
+			mutex_unlock(&log_mutex);
+			return false;
+		}
+		else{
+			mutex_lock(&log_mutex);
+			cpu_log_count[cpu]++;
+			mutex_unlock(&log_mutex);
+			return true;
+		}
+	}else{
+		/* First print */
+		mutex_lock(&log_mutex);
+		cpu_error |= BIT(cpu);
+		cpu_log_count[cpu] = 1;
+		mutex_unlock(&log_mutex);
+		return false;
+	}
+}
+
+static void unlimit_cpu_error_log(int cpu){
+	if(cpu_error&BIT(cpu)){
+		mutex_lock(&log_mutex);
+		cpu_error &= ~(BIT(cpu));
+		cpu_log_count[cpu] = 0;
+		mutex_unlock(&log_mutex);
+	}
+}
+/*--- ASUS_BSP Show: reduce thermal log ---*/
 
 static void uio_init(struct platform_device *pdev)
 {
@@ -2360,6 +2403,7 @@ fail:
 
 static int create_sensor_id_map(struct device *dev)
 {
+	int i = 0;
 	int ret = 0;
 
 	tsens_id_map = devm_kzalloc(dev,
@@ -2370,10 +2414,19 @@ static int create_sensor_id_map(struct device *dev)
 		return -ENOMEM;
 	}
 
-	ret = tsens_get_hw_id_mapping(max_tsens_num, tsens_id_map);
-	if (ret) {
-		pr_err("Failed to get tsens id's:%d\n", ret);
-		goto fail;
+	for (i = 0; i < max_tsens_num; i++) {
+		ret = tsens_get_hw_id_mapping(i, &tsens_id_map[i]);
+		/* If return -ENXIO, hw_id is default in sequence */
+		if (ret) {
+			if (ret == -ENXIO) {
+				tsens_id_map[i] = i;
+				ret = 0;
+			} else {
+				pr_err("Failed to get hw id for id:%d.err:%d\n",
+						i, ret);
+				goto fail;
+			}
+		}
 	}
 
 	return ret;
@@ -2684,7 +2737,7 @@ static void vdd_mx_notify(struct therm_threshold *trig_thresh)
 			pr_err("Failed to remove vdd mx restriction\n");
 	}
 	mutex_unlock(&vdd_mx_mutex);
-
+	
 	if (trig_thresh->cur_state != trig_thresh->trip_triggered) {
 		sensor_mgr_set_threshold(trig_thresh->sensor_id,
 					trig_thresh->threshold);
@@ -2812,7 +2865,7 @@ static void __ref do_core_control(long temp)
 				cpu_dev = get_cpu_device(i);
 				trace_thermal_pre_core_offline(i);
 				ret = device_offline(cpu_dev);
-				if (ret < 0)
+				if (ret)
 					pr_err("Error %d offline core %d\n",
 					       ret, i);
 				trace_thermal_post_core_offline(i,
@@ -2885,8 +2938,7 @@ static int __ref update_offline_cores(int val)
 			cpu_dev = get_cpu_device(cpu);
 			trace_thermal_pre_core_offline(cpu);
 			ret = device_offline(cpu_dev);
-			if (ret < 0) {
-				cpus_offlined &= ~BIT(cpu);
+			if (ret) {
 				pr_err_ratelimited(
 					"Unable to offline CPU%d. err:%d\n",
 					cpu, ret);
@@ -2917,13 +2969,23 @@ static int __ref update_offline_cores(int val)
 			} else if (ret) {
 				cpus_offlined |= BIT(cpu);
 				pend_hotplug_req = true;
-				pr_err_ratelimited(
-					"Unable to online CPU%d. err:%d\n",
-					cpu, ret);
+				/*+++ ASUS_BSP Show: reduce thermal log +++*/
+				if(limit_cpu_error_log(cpu)){
+					pr_err_ratelimited(
+						"Unable to online CPU%d. err:%d\n",
+						cpu, ret);
+				}
+				/*--- ASUS_BSP Show: reduce thermal log ---*/
 			} else {
 				pr_debug("Onlined CPU%d\n", cpu);
 				trace_thermal_post_core_online(cpu,
 					cpumask_test_cpu(cpu, cpu_online_mask));
+				/*+++ ASUS_BSP Show: reduce thermal log +++*/
+				if(cpu_error&BIT(cpu)){
+					unlimit_cpu_error_log(cpu);
+					printk("Onlined CPU%d\n", cpu);
+				}
+				/*--- ASUS_BSP Show: reduce thermal log ---*/
 			}
 			unlock_device_hotplug();
 		}
@@ -2956,14 +3018,6 @@ static __ref int do_hotplug(void *data)
 			&hotplug_notify_complete) != 0)
 			;
 		reinit_completion(&hotplug_notify_complete);
-
-		/*
-		 * Suspend framework will have disabled the
-		 * hotplug functionality. So wait till the suspend exits
-		 * and then re-evaluate.
-		 */
-		if (in_suspend)
-			continue;
 		mask = 0;
 
 		mutex_lock(&core_control_mutex);
@@ -4689,9 +4743,10 @@ static void __ref disable_msm_thermal(void)
 
 static void interrupt_mode_init(void)
 {
-	if (!msm_thermal_probed)
+	if (!msm_thermal_probed) {
+		interrupt_mode_enable = true;
 		return;
-
+	}
 	if (polling_enabled) {
 		polling_enabled = 0;
 		create_sensor_zone_id_map();
@@ -4767,7 +4822,7 @@ static ssize_t __ref store_cc_enabled(struct kobject *kobj,
 		hotplug_init_cpu_offlined();
 		mutex_lock(&core_control_mutex);
 		update_offline_cores(cpus_offlined);
-		if (hotplug_enabled && hotplug_task) {
+		if (hotplug_enabled) {
 			for_each_possible_cpu(cpu) {
 				if (!(msm_thermal_info.core_control_mask &
 					BIT(cpus[cpu].cpu)))
@@ -7111,10 +7166,15 @@ static int msm_thermal_dev_probe(struct platform_device *pdev)
 	ret = msm_thermal_init(&data);
 	msm_thermal_probed = true;
 
+	if (interrupt_mode_enable) {
+		interrupt_mode_init();
+		interrupt_mode_enable = false;
+	}
+
 	return ret;
 fail:
 	if (ret)
-		pr_err("Failed reading node=%s, key=%s. err:%d\n",
+		pr_err("Warning reading node=%s, key=%s. err:%d\n",
 			node->full_name, key, ret);
 probe_exit:
 	return ret;
@@ -7246,6 +7306,7 @@ int __init msm_thermal_late_init(void)
 		}
 	}
 	msm_thermal_add_mx_nodes();
+	interrupt_mode_init();
 	create_cpu_topology_sysfs();
 	create_thermal_debugfs();
 	msm_thermal_add_bucket_info_nodes();

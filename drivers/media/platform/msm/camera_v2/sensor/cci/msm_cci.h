@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -23,6 +23,10 @@
 #include "msm_sd.h"
 #include "cam_soc_api.h"
 
+//ASUS_BSP PJ_Ma+++
+#define DEFINE_MSM_MUTEX(mutexname) \
+	static struct mutex mutexname = __MUTEX_INITIALIZER(mutexname)
+//ASUS_BSP PJ_Ma---
 #define NUM_MASTERS 2
 #define NUM_QUEUES 2
 
@@ -90,7 +94,7 @@ struct msm_camera_cci_gpio_cfg {
 };
 
 struct msm_camera_cci_i2c_read_cfg {
-	uint32_t addr;
+	uint16_t addr;
 	enum msm_camera_i2c_reg_addr_type addr_type;
 	uint8_t *data;
 	uint16_t num_byte;
@@ -125,7 +129,6 @@ struct msm_camera_cci_master_info {
 	struct mutex mutex_q[NUM_QUEUES];
 	struct completion report_q[NUM_QUEUES];
 	atomic_t done_pending[NUM_QUEUES];
-	spinlock_t lock_q[NUM_QUEUES];
 };
 
 struct msm_cci_clk_params_t {

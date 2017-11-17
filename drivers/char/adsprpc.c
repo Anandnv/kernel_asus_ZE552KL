@@ -212,7 +212,6 @@ struct fastrpc_apps {
 	spinlock_t hlock;
 	struct ion_client *client;
 	struct device *dev;
-	struct device *modem_cma_dev;
 	bool glink;
 };
 
@@ -264,12 +263,6 @@ static struct fastrpc_channel_ctx gcinfo[NUM_CHANNELS] = {
 		.channel = SMD_APPS_DSPS,
 		.edge = "dsps",
 		.vmid = VMID_SSC_Q6,
-	},
-	{
-		.name = "mdsprpc-smd",
-		.subsys = "mdsp",
-		.channel = SMD_APPS_MODEM,
-		.edge = "mdsp",
 	},
 };
 
@@ -1070,7 +1063,7 @@ static int get_args(uint32_t kernel, struct smq_invoke_ctx *ctx)
 	for (oix = 0; oix < inbufs + outbufs; ++oix) {
 		int i = ctx->overps[oix]->raix;
 		struct fastrpc_mmap *map = ctx->maps[i];
-		ssize_t mlen;
+		ssize_t mlen = ctx->overps[oix]->mend - ctx->overps[oix]->mstart;
 		uint64_t buf;
 		ssize_t len = lpra[i].buf.len;
 		if (!len)
@@ -1081,7 +1074,6 @@ static int get_args(uint32_t kernel, struct smq_invoke_ctx *ctx)
 			rlen -= ALIGN(args, BALIGN) - args;
 			args = ALIGN(args, BALIGN);
 		}
-		mlen = ctx->overps[oix]->mend - ctx->overps[oix]->mstart;
 		VERIFY(err, rlen >= mlen);
 		if (err)
 			goto bail;
@@ -1726,11 +1718,6 @@ static int fastrpc_file_free(struct fastrpc_file *fl)
 	hlist_del_init(&fl->hn);
 	spin_unlock(&fl->apps->hlock);
 
-	if (!fl->sctx) {
-		kfree(fl);
-		return 0;
-	}
-
 	(void)fastrpc_release_current_dsp_process(fl);
 	fastrpc_context_list_dtor(fl);
 	fastrpc_buf_list_free(fl);
@@ -1749,26 +1736,17 @@ static int fastrpc_session_alloc(struct fastrpc_channel_ctx *chan, int *session)
 	struct fastrpc_apps *me = &gfa;
 	int idx = 0, err = 0;
 
-	switch (chan->channel) {
-	case SMD_APPS_QDSP:
+	if (chan->sesscount) {
 		idx = ffz(chan->bitmap);
 		VERIFY(err, idx < chan->sesscount);
 		if (err)
 			goto bail;
 		set_bit(idx, &chan->bitmap);
-		break;
-	case SMD_APPS_DSPS:
+	} else {
 		VERIFY(err, me->dev != NULL);
 		if (err)
 			goto bail;
 		chan->session[0].dev = me->dev;
-		break;
-	case SMD_APPS_MODEM:
-		VERIFY(err, me->dev != NULL);
-		if (err)
-			goto bail;
-		chan->session[0].dev = me->modem_cma_dev;
-		break;
 	}
 
 	chan->session[idx].smmu.faults = 0;
@@ -1895,10 +1873,7 @@ static void file_free_work_handler(struct work_struct *w)
 			break;
 		}
 		mutex_unlock(&me->flfree_mutex);
-		if (freefl) {
-			fastrpc_file_free(freefl->fl);
-			kfree(freefl);
-		}
+		fastrpc_file_free(freefl->fl);
 		mutex_lock(&me->flfree_mutex);
 
 		if (hlist_empty(&me->fls)) {
@@ -1908,6 +1883,7 @@ static void file_free_work_handler(struct work_struct *w)
 			break;
 		}
 		mutex_unlock(&me->flfree_mutex);
+		kfree(freefl);
 	}
 	return;
 }
@@ -2185,7 +2161,6 @@ static struct of_device_id fastrpc_match_table[] = {
 	{ .compatible = "qcom,msm-fastrpc-compute-cb", },
 	{ .compatible = "qcom,msm-fastrpc-legacy-compute-cb", },
 	{ .compatible = "qcom,msm-adsprpc-mem-region", },
-	{ .compatible = "qcom,msm-mdsprpc-mem-region", },
 	{}
 };
 
@@ -2355,12 +2330,6 @@ static int fastrpc_probe(struct platform_device *pdev)
 			pr_err("ADSPRPC: Unable to create adsp-remoteheap ramdump device.\n");
 			me->channel[0].remoteheap_ramdump_dev = NULL;
 		}
-		return 0;
-	}
-
-	if (of_device_is_compatible(dev->of_node,
-					"qcom,msm-mdsprpc-mem-region")) {
-		me->modem_cma_dev = dev;
 		return 0;
 	}
 

@@ -828,7 +828,7 @@ int ipa3_cfg_route(struct ipahal_reg_route *route)
  */
 int ipa3_cfg_filter(u32 disable)
 {
-	IPAERR_RL("Filter disable is not supported!\n");
+	IPAERR("Filter disable is not supported!\n");
 	return -EPERM;
 }
 
@@ -902,7 +902,7 @@ u8 ipa3_get_hw_type_index(void)
 int ipa3_get_ep_mapping(enum ipa_client_type client)
 {
 	if (client >= IPA_CLIENT_MAX || client < 0) {
-		IPAERR_RL("Bad client number! client =%d\n", client);
+		IPAERR("Bad client number! client =%d\n", client);
 		return -EINVAL;
 	}
 
@@ -1006,11 +1006,6 @@ enum ipacm_client_enum ipa3_get_client(int pipe_idx)
  */
 bool ipa3_get_client_uplink(int pipe_idx)
 {
-	if (pipe_idx < 0 || pipe_idx >= IPA3_MAX_NUM_PIPES) {
-		IPAERR("invalid pipe idx %d\n", pipe_idx);
-		return false;
-	}
-
 	return ipa3_ctx->ipacm_client[pipe_idx].uplink;
 }
 
@@ -3461,19 +3456,19 @@ int ipa3_write_qmap_id(struct ipa_ioc_write_qmapid *param_in)
 	int result = -EINVAL;
 
 	if (param_in->client  >= IPA_CLIENT_MAX) {
-		IPAERR_RL("bad parm client:%d\n", param_in->client);
+		IPAERR("bad parm client:%d\n", param_in->client);
 		goto fail;
 	}
 
 	ipa_ep_idx = ipa3_get_ep_mapping(param_in->client);
 	if (ipa_ep_idx == -1) {
-		IPAERR_RL("Invalid client.\n");
+		IPAERR("Invalid client.\n");
 		goto fail;
 	}
 
 	ep = &ipa3_ctx->ep[ipa_ep_idx];
 	if (!ep->valid) {
-		IPAERR_RL("EP not allocated.\n");
+		IPAERR("EP not allocated.\n");
 		goto fail;
 	}
 
@@ -3486,7 +3481,7 @@ int ipa3_write_qmap_id(struct ipa_ioc_write_qmapid *param_in)
 		ipa3_ctx->ep[ipa_ep_idx].cfg.meta = meta;
 		result = ipa3_write_qmapid_wdi_pipe(ipa_ep_idx, meta.qmap_id);
 		if (result)
-			IPAERR_RL("qmap_id %d write failed on ep=%d\n",
+			IPAERR("qmap_id %d write failed on ep=%d\n",
 					meta.qmap_id, ipa_ep_idx);
 		result = 0;
 	}
@@ -4275,7 +4270,7 @@ static int ipa3_tag_generate_force_close_desc(struct ipa3_desc desc[],
 			IPAHAL_FULL_PIPELINE_CLEAR;
 		reg_write_agg_close.offset =
 			ipahal_get_reg_ofst(IPA_AGGR_FORCE_CLOSE);
-		ipahal_get_aggr_force_close_valmask(i, &valmask);
+		ipahal_get_aggr_force_close_valmask(1<<i, &valmask);
 		reg_write_agg_close.value = valmask.val;
 		reg_write_agg_close.value_mask = valmask.mask;
 		cmd_pyld = ipahal_construct_imm_cmd(IPA_IMM_CMD_REGISTER_WRITE,
@@ -5320,12 +5315,12 @@ static int ipa3_load_single_fw(const struct firmware *firmware,
 	return 0;
 }
 
+
 /**
  * ipa3_load_fws() - Load the IPAv3 FWs into IPA&GSI SRAM.
  *
  * @firmware: Structure which contains the FW data from the user space.
  * @gsi_mem_base: GSI base address
- *
  * Return value: 0 on success, negative otherwise
  *
  */
@@ -5344,6 +5339,7 @@ int ipa3_load_fws(const struct firmware *firmware, phys_addr_t gsi_mem_base)
 		return -EINVAL;
 	}
 
+
 	ipa_assert_on(!firmware);
 	/* One program header per FW image: GSI, DPS and HPS */
 	if (firmware->size < (sizeof(*ehdr) + 3 * sizeof(*phdr))) {
@@ -5360,6 +5356,7 @@ int ipa3_load_fws(const struct firmware *firmware, phys_addr_t gsi_mem_base)
 	}
 	phdr = (struct elf32_phdr *)(firmware->data + sizeof(*ehdr));
 
+
 	/*
 	 * Each ELF program header represents a FW image and contains:
 	 *  p_vaddr : The starting address to which the FW needs to loaded.
@@ -5367,6 +5364,7 @@ int ipa3_load_fws(const struct firmware *firmware, phys_addr_t gsi_mem_base)
 	 *  p_filesz: The size of the FW image embedded inside the ELF
 	 *  p_offset: Absolute offset to the image from the head of the ELF
 	 */
+
 
 	/* Load GSI FW image */
 	gsi_get_inst_ram_offset_and_size(&gsi_iram_ofst, &gsi_iram_size);
@@ -5385,8 +5383,10 @@ int ipa3_load_fws(const struct firmware *firmware, phys_addr_t gsi_mem_base)
 	if (rc)
 		return rc;
 
+
 	phdr++;
 	ipa_reg_mem_base = ipa3_ctx->ipa_wrapper_base + ipahal_get_reg_base();
+
 
 	/* Load IPA DPS FW image */
 	ipa_reg_ofst = ipahal_get_reg_ofst(IPA_DPS_SEQUENCER_FIRST);
@@ -5404,6 +5404,7 @@ int ipa3_load_fws(const struct firmware *firmware, phys_addr_t gsi_mem_base)
 	rc = ipa3_load_single_fw(firmware, phdr);
 	if (rc)
 		return rc;
+
 
 	phdr++;
 

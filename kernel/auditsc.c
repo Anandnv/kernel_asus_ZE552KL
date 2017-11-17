@@ -1046,7 +1046,7 @@ static void audit_log_execve_info(struct audit_context *context,
 	if (!buf_head) {
 		audit_panic("out of memory for argv string");
 		return;
-	}
+ 	}
 	buf = buf_head;
 
 	audit_log_format(*ab, "argc=%d", context->execve.argc);
@@ -1059,6 +1059,7 @@ static void audit_log_execve_info(struct audit_context *context,
 	iter = 0;
 	arg = 0;
 	do {
+
 		/* NOTE: we don't ever want to trust this value for anything
 		 *       serious, but the audit record format insists we
 		 *       provide an argument length for really long arguments,
@@ -1107,7 +1108,6 @@ static void audit_log_execve_info(struct audit_context *context,
 			}
 			len_buf += len_tmp;
 			buf_head[len_buf] = '\0';
-
 			/* length of the buffer in the audit record? */
 			len_abuf = (encode ? len_buf * 2 : len_buf + 2);
 		}
@@ -1126,7 +1126,6 @@ static void audit_log_execve_info(struct audit_context *context,
 				if (!*ab)
 					goto out;
 			}
-
 			/* create the non-arg portion of the arg record */
 			len_tmp = 0;
 			if (require_data || (iter > 0) ||
@@ -1169,7 +1168,6 @@ static void audit_log_execve_info(struct audit_context *context,
 			len_buf -= len_tmp;
 			buf += len_tmp;
 		}
-
 		/* ready to move to the next argument? */
 		if ((len_buf == 0) && !require_data) {
 			arg++;
@@ -1179,9 +1177,7 @@ static void audit_log_execve_info(struct audit_context *context,
 			encode = false;
 		}
 	} while (arg < context->execve.argc);
-
 	/* NOTE: the caller handles the final audit_log_end() call */
-
 out:
 	kfree(buf_head);
 }

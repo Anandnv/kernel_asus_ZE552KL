@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -398,15 +398,6 @@ static int msm_gfx_ldo_enable(struct regulator_dev *rdev)
 				ldo_vreg->corner + MIN_CORNER_OFFSET);
 
 	if (ldo_vreg->vdd_cx) {
-		rc = regulator_set_voltage(ldo_vreg->vdd_cx,
-			ldo_vreg->vdd_cx_corner_map[ldo_vreg->corner],
-			INT_MAX);
-		if (rc) {
-			pr_err("Unable to set CX for corner %d rc=%d\n",
-				ldo_vreg->corner + MIN_CORNER_OFFSET, rc);
-			goto fail;
-		}
-
 		rc = regulator_enable(ldo_vreg->vdd_cx);
 		if (rc) {
 			pr_err("regulator_enable: vdd_cx: failed rc=%d\n", rc);
@@ -655,17 +646,6 @@ static int msm_gfx_ldo_set_voltage(struct regulator_dev *rdev,
 	else if (corner < ldo_vreg->corner)
 		dir = DOWN;
 
-	if (ldo_vreg->mem_acc_vreg && dir == DOWN) {
-		mem_acc_corner = ldo_vreg->mem_acc_corner_map[corner];
-		rc = regulator_set_voltage(ldo_vreg->mem_acc_vreg,
-				mem_acc_corner, mem_acc_corner);
-	}
-
-	if (!ldo_vreg->vreg_enabled) {
-		ldo_vreg->corner = corner;
-		goto done;
-	}
-
 	if (ldo_vreg->vdd_cx) {
 		rc = regulator_set_voltage(ldo_vreg->vdd_cx,
 			ldo_vreg->vdd_cx_corner_map[corner],
@@ -675,6 +655,17 @@ static int msm_gfx_ldo_set_voltage(struct regulator_dev *rdev,
 					corner + MIN_CORNER_OFFSET, rc);
 			goto done;
 		}
+	}
+
+	if (ldo_vreg->mem_acc_vreg && dir == DOWN) {
+		mem_acc_corner = ldo_vreg->mem_acc_corner_map[corner];
+		rc = regulator_set_voltage(ldo_vreg->mem_acc_vreg,
+				mem_acc_corner, mem_acc_corner);
+	}
+
+	if (!ldo_vreg->vreg_enabled) {
+		ldo_vreg->corner = corner;
+		goto done;
 	}
 
 	new_mode = get_operating_mode(ldo_vreg, corner);
@@ -764,9 +755,6 @@ static int msm_gfx_ldo_adjust_init_voltage(struct msm_gfx_ldo *ldo_vreg)
 
 	volt_adjust = devm_kcalloc(ldo_vreg->dev, size, sizeof(*volt_adjust),
 								GFP_KERNEL);
-	if (!volt_adjust)
-		return -ENOMEM;
-
 	rc = of_property_read_u32_array(of_node, prop_name, volt_adjust, size);
 	if (rc) {
 		pr_err("failed to read %s property rc=%d\n", prop_name, rc);

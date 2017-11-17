@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -63,8 +63,6 @@
 #define FREEZIO_N			BIT(1)
 #define POWER_DOWN			BIT(0)
 
-#define QUSB2PHY_PORT_TEST_CTRL		0xB8
-
 #define QUSB2PHY_PORT_UTMI_CTRL1	0xC0
 #define SUSPEND_N			BIT(5)
 #define TERM_SELECT			BIT(4)
@@ -119,6 +117,22 @@ unsigned int tune2;
 module_param(tune2, uint, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(tune2, "QUSB PHY TUNE2");
 
+// ASUS_BSP +++ Support Dynamic Tuning PHY Parameters
+unsigned int PHY_PORT_TUNE1 = 0;
+unsigned int PHY_PORT_TUNE2 = 0;
+unsigned int PHY_PORT_TUNE3 = 0;
+unsigned int PHY_PORT_TUNE4 = 0;
+module_param(PHY_PORT_TUNE1, uint, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(PHY_PORT_TUNE1, "QUSB PHY TUNE1");
+module_param(PHY_PORT_TUNE2, uint, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(PHY_PORT_TUNE2, "QUSB PHY TUNE2");
+module_param(PHY_PORT_TUNE3, uint, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(PHY_PORT_TUNE3, "QUSB PHY TUNE3");
+module_param(PHY_PORT_TUNE4, uint, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(PHY_PORT_TUNE4, "QUSB PHY TUNE4");
+extern bool g_is_CN_sku;// = false;
+// ASUS_BSP --- Support Dynamic Tuning PHY Parameters
+
 struct qusb_phy {
 	struct usb_phy		phy;
 	void __iomem		*base;
@@ -142,6 +156,7 @@ struct qusb_phy {
 	int			vdd_levels[3]; /* none, low, high */
 	int			init_seq_len;
 	int			*qusb_phy_init_seq;
+	int			*qusb_phy_init_seq_host;
 
 	u32			tune2_val;
 	int			tune2_efuse_bit_pos;
@@ -293,7 +308,7 @@ static int qusb_phy_enable_power(struct qusb_phy *qphy, bool on)
 			__func__, on ? "on" : "off", qphy->power_enabled);
 
 	if (qphy->power_enabled == on) {
-		dev_dbg(qphy->phy.dev, "PHYs' regulators are already ON.\n");
+		dev_info(qphy->phy.dev, "PHYs' regulators are already ON.\n");
 		return 0;
 	}
 
@@ -703,11 +718,14 @@ static int qusb_phy_init(struct usb_phy *phy)
 {
 	struct qusb_phy *qphy = container_of(phy, struct qusb_phy, phy);
 	int ret, reset_val = 0;
+	int temp = 0;
 	bool is_se_clk = true;
 
 	dev_dbg(phy->dev, "%s\n", __func__);
+	printk("%s+++\n",__func__);
 
 	ret = qusb_phy_enable_power(qphy, true);
+
 	if (ret)
 		return ret;
 
@@ -770,9 +788,18 @@ static int qusb_phy_init(struct usb_phy *phy)
 	/* save reset value to override based on clk scheme */
 	reset_val = readl_relaxed(qphy->base + QUSB2PHY_PLL_TEST);
 
-	if (qphy->qusb_phy_init_seq)
+	// ASUS_BSP "Support using different set of PHY parameters for USB Host"
+	if(qphy->phy.flags & PHY_HOST_MODE){
+		printk("QUSB PHY init using host parameters(%s)\n", g_is_CN_sku ? "cn":g_ASUS_hwID < 0x10 ? "libra":"leo");
+		if (qphy->qusb_phy_init_seq_host)
+		qusb_phy_write_seq(qphy->base, qphy->qusb_phy_init_seq_host,
+				qphy->init_seq_len, 0);
+	}else{
+		printk("QUSB PHY init using client parameters(%s)\n", g_is_CN_sku ? "cn":g_ASUS_hwID < 0x10 ? "libra":"leo");
+		if (qphy->qusb_phy_init_seq)
 		qusb_phy_write_seq(qphy->base, qphy->qusb_phy_init_seq,
 				qphy->init_seq_len, 0);
+	}
 
 	/*
 	 * Check for EFUSE value only if tune2_efuse_reg is available
@@ -848,6 +875,41 @@ static int qusb_phy_init(struct usb_phy *phy)
 			readb_relaxed(qphy->base + QUSB2PHY_PLL_STATUS));
 		WARN_ON(1);
 	}
+
+	// ASUS_BSP +++ Support Dynamic Tuning PHY Parameters
+	if(PHY_PORT_TUNE1)
+	{
+		writel_relaxed(PHY_PORT_TUNE1,qphy->base + QUSB2PHY_PORT_TUNE1);
+		temp = readb_relaxed(qphy->base + QUSB2PHY_PORT_TUNE1);
+		printk("QUSB2PHY_PORT_TUNE1 : %02x\n",temp);
+	}
+	if(PHY_PORT_TUNE2)
+	{
+		writel_relaxed(PHY_PORT_TUNE2,qphy->base + QUSB2PHY_PORT_TUNE2);
+		temp = readb_relaxed(qphy->base + QUSB2PHY_PORT_TUNE2);
+		printk("QUSB2PHY_PORT_TUNE2 : %02x\n",temp);
+	}
+	if(PHY_PORT_TUNE3)
+	{
+		writel_relaxed(PHY_PORT_TUNE3,qphy->base + QUSB2PHY_PORT_TUNE3);
+		temp = readb_relaxed(qphy->base + QUSB2PHY_PORT_TUNE3);
+		printk("QUSB2PHY_PORT_TUNE3 : %02x\n",temp);
+	}
+	if(PHY_PORT_TUNE4)
+	{
+		writel_relaxed(PHY_PORT_TUNE4,qphy->base + QUSB2PHY_PORT_TUNE4);
+		temp = readb_relaxed(qphy->base + QUSB2PHY_PORT_TUNE4);
+		printk("QUSB2PHY_PORT_TUNE4 : %02x\n",temp);
+	}
+	printk("QUSB2PHY_PORT_TUNE1:%02x,QUSB2PHY_PORT_TUNE2:%02x,QUSB2PHY_PORT_TUNE3:%02x,QUSB2PHY_PORT_TUNE4:%02x\n",
+		readb_relaxed(qphy->base + QUSB2PHY_PORT_TUNE1),
+		readb_relaxed(qphy->base + QUSB2PHY_PORT_TUNE2),
+		readb_relaxed(qphy->base + QUSB2PHY_PORT_TUNE3),
+		readb_relaxed(qphy->base + QUSB2PHY_PORT_TUNE4));
+	wmb();
+	// ASUS_BSP --- Support Dynamic Tuning PHY Parameters
+
+	printk("%s---\n",__func__);
 
 	return 0;
 }
@@ -994,23 +1056,6 @@ static int qusb_phy_set_suspend(struct usb_phy *phy, int suspend)
 			writel_relaxed(intr_mask,
 				qphy->base + QUSB2PHY_PORT_INTR_CTRL);
 
-			if (linestate & (LINESTATE_DP | LINESTATE_DM)) {
-				/* enable phy auto-resume */
-				writel_relaxed(0x0C,
-					qphy->base + QUSB2PHY_PORT_TEST_CTRL);
-				/* flush the previous write before next write */
-				wmb();
-				writel_relaxed(0x04,
-					qphy->base + QUSB2PHY_PORT_TEST_CTRL);
-			}
-
-
-			dev_dbg(phy->dev, "%s: intr_mask = %x\n",
-			__func__, intr_mask);
-
-			/* Makes sure that above write goes through */
-			wmb();
-
 			qusb_phy_enable_clocks(qphy, false);
 		} else { /* Disconnect case */
 			/* Disable all interrupts */
@@ -1024,12 +1069,7 @@ static int qusb_phy_set_suspend(struct usb_phy *phy, int suspend)
 			if (qphy->tcsr_phy_lvl_shift_keeper)
 				writel_relaxed(0x0,
 					qphy->tcsr_phy_lvl_shift_keeper);
-			/* Do not disable power rails if there is vote for it */
-			if (!qphy->rm_pulldown)
-				qusb_phy_enable_power(qphy, false);
-			else
-				dev_dbg(phy->dev, "race with rm_pulldown. Keep ldo ON\n");
-
+			qusb_phy_enable_power(qphy, false);
 			/*
 			 * Set put_into_high_z_state to true so next USB
 			 * cable connect, DPF_DMF request performs PHY
@@ -1097,7 +1137,7 @@ static int qusb_phy_notify_connect(struct usb_phy *phy,
 	qusb_write_readback(qphy->qscratch_base, HS_PHY_CTRL_REG,
 				SW_SESSVLD_SEL, SW_SESSVLD_SEL);
 
-	dev_dbg(phy->dev, "QUSB2 phy connect notification\n");
+	dev_info(phy->dev, "QUSB2 phy connect notification\n");
 	return 0;
 }
 
@@ -1108,7 +1148,7 @@ static int qusb_phy_notify_disconnect(struct usb_phy *phy,
 
 	qphy->cable_connected = false;
 
-	dev_dbg(phy->dev, " cable_connected=%d\n", qphy->cable_connected);
+	dev_info(phy->dev, " cable_connected=%d\n", qphy->cable_connected);
 
 	/* Set OTG VBUS Valid from HSPHY to controller */
 	qusb_write_readback(qphy->qscratch_base, HS_PHY_CTRL_REG,
@@ -1118,7 +1158,7 @@ static int qusb_phy_notify_disconnect(struct usb_phy *phy,
 	qusb_write_readback(qphy->qscratch_base, HS_PHY_CTRL_REG,
 				SW_SESSVLD_SEL, 0);
 
-	dev_dbg(phy->dev, "QUSB2 phy disconnect notification\n");
+	dev_info(phy->dev, "QUSB2 phy disconnect notification\n");
 	return 0;
 }
 
@@ -1332,8 +1372,12 @@ static int qusb_phy_probe(struct platform_device *pdev)
 			dev_dbg(dev, "error allocating memory for emu_dcm_reset_seq\n");
 		}
 	}
-
-	of_get_property(dev->of_node, "qcom,qusb-phy-init-seq", &size);
+	if(g_is_CN_sku)
+		of_get_property(dev->of_node, "qcom,qusb-phy-init-seq-cn", &size);
+	else if(g_ASUS_hwID < 0x10)
+		of_get_property(dev->of_node, "qcom,qusb-phy-init-seq-libra", &size);
+	else
+		of_get_property(dev->of_node, "qcom,qusb-phy-init-seq-leo", &size);
 	if (size) {
 		qphy->qusb_phy_init_seq = devm_kzalloc(dev,
 						size, GFP_KERNEL);
@@ -1344,13 +1388,60 @@ static int qusb_phy_probe(struct platform_device *pdev)
 				dev_err(dev, "invalid init_seq_len\n");
 				return -EINVAL;
 			}
-
-			of_property_read_u32_array(dev->of_node,
-				"qcom,qusb-phy-init-seq",
-				qphy->qusb_phy_init_seq,
-				qphy->init_seq_len);
+			if(g_is_CN_sku)
+				of_property_read_u32_array(dev->of_node,
+					"qcom,qusb-phy-init-seq-cn",
+					qphy->qusb_phy_init_seq,
+					qphy->init_seq_len);
+			else if(g_ASUS_hwID < 0x10)
+				of_property_read_u32_array(dev->of_node,
+					"qcom,qusb-phy-init-seq-libra",
+					qphy->qusb_phy_init_seq,
+					qphy->init_seq_len);
+			else
+				of_property_read_u32_array(dev->of_node,
+					"qcom,qusb-phy-init-seq-leo",
+					qphy->qusb_phy_init_seq,
+					qphy->init_seq_len);
 		} else {
 			dev_err(dev, "error allocating memory for phy_init_seq\n");
+		}
+	}
+
+	// ASUS_BSP "Support using different set of PHY parameters for USB Host"
+	if(g_is_CN_sku)
+		of_get_property(dev->of_node, "qcom,qusb-phy-init-seq-host-cn", &size);
+	else if(g_ASUS_hwID < 0x10)
+		of_get_property(dev->of_node, "qcom,qusb-phy-init-seq-host-libra", &size);
+	else
+		of_get_property(dev->of_node, "qcom,qusb-phy-init-seq-host-leo", &size);
+	if (size) {
+		qphy->qusb_phy_init_seq_host = devm_kzalloc(dev,
+						size, GFP_KERNEL);
+		if (qphy->qusb_phy_init_seq_host) {
+			qphy->init_seq_len =
+				(size / sizeof(*qphy->qusb_phy_init_seq_host));
+			if (qphy->init_seq_len % 2) {
+				dev_err(dev, "invalid init_seq_len\n");
+				return -EINVAL;
+			}
+			if(g_is_CN_sku)
+				of_property_read_u32_array(dev->of_node,
+					"qcom,qusb-phy-init-seq-host-cn",
+					qphy->qusb_phy_init_seq_host,
+					qphy->init_seq_len);
+			else if(g_ASUS_hwID < 0x10)
+				of_property_read_u32_array(dev->of_node,
+					"qcom,qusb-phy-init-seq-host-libra",
+					qphy->qusb_phy_init_seq_host,
+					qphy->init_seq_len);
+			else
+				of_property_read_u32_array(dev->of_node,
+					"qcom,qusb-phy-init-seq-host-leo",
+					qphy->qusb_phy_init_seq_host,
+					qphy->init_seq_len);
+		} else {
+			dev_err(dev, "error allocating memory for phy_init_seq_host\n");
 		}
 	}
 

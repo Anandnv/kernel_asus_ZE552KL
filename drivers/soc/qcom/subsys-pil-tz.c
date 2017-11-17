@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -786,6 +786,7 @@ static void log_failure_reason(const struct pil_tz_data *d)
 	u32 size;
 	char *smem_reason, reason[MAX_SSR_REASON_LEN];
 	const char *name = d->subsys_desc.name;
+	char myname[32];/*ASUS-BBSP Save SSR reason+*/
 
 	if (d->smem_id == -1)
 		return;
@@ -806,6 +807,8 @@ static void log_failure_reason(const struct pil_tz_data *d)
 	pr_err("%s subsystem failure reason: %s.\n", name, reason);
 
 	smem_reason[0] = '\0';
+	strlcpy(myname, name, 32);/*ASUS-BBSP Save SSR reason+*/
+	subsys_save_reason(myname, reason);/*ASUS-BBSP Save SSR reason+*/
 	wmb();
 }
 
@@ -1000,7 +1003,6 @@ static int pil_tz_driver_probe(struct platform_device *pdev)
 	d->desc.ops = &pil_ops_trusted;
 
 	d->desc.proxy_timeout = PROXY_TIMEOUT_MS;
-	d->desc.clear_fw_region = true;
 
 	rc = of_property_read_u32(pdev->dev.of_node, "qcom,proxy-timeout-ms",
 					&proxy_timeout);

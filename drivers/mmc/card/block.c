@@ -620,15 +620,6 @@ static int mmc_blk_ioctl_cmd(struct block_device *bdev,
 	idata = mmc_blk_ioctl_copy_from_user(ic_ptr);
 	if (IS_ERR_OR_NULL(idata))
 		return PTR_ERR(idata);
-	if (idata->ic.postsleep_max_us < idata->ic.postsleep_min_us) {
-		pr_err("%s: min value: %u must not be greater than max value: %u\n",
-			__func__, idata->ic.postsleep_min_us,
-			idata->ic.postsleep_max_us);
-		WARN_ON(1);
-		err = -EPERM;
-		goto cmd_err;
-	}
-
 	md = mmc_blk_get(bdev->bd_disk);
 	if (!md) {
 		err = -EINVAL;
@@ -1534,6 +1525,13 @@ static int mmc_blk_cmdq_issue_discard_rq(struct mmc_queue *mq,
 	from = blk_rq_pos(req);
 	nr = blk_rq_sectors(req);
 
+//ASUS_BSP Deeo : mmc suspend stress test +++
+#ifdef CONFIG_MMC_SUSPEND_TEST
+	if (card->host->suspendtest)
+             card->sectors_changed += blk_rq_sectors(req);
+#endif
+//ASUS_BSP Deeo : mmc suspend stress test ---
+
 	if (mmc_can_discard(card))
 		arg = MMC_DISCARD_ARG;
 	else if (mmc_can_trim(card))
@@ -1576,6 +1574,14 @@ static int mmc_blk_issue_discard_rq(struct mmc_queue *mq, struct request *req)
 
 	from = blk_rq_pos(req);
 	nr = blk_rq_sectors(req);
+
+//ASUS_BSP Deeo : mmc suspend stress test +++
+#ifdef CONFIG_MMC_SUSPEND_TEST
+        if (card->host->suspendtest)
+                 card->sectors_changed += blk_rq_sectors(req);
+#endif
+//ASUS_BSP Deeo : mmc suspend stress test ---
+
 
 	if (mmc_can_discard(card))
 		arg = MMC_DISCARD_ARG;
@@ -1622,6 +1628,13 @@ static int mmc_blk_cmdq_issue_secdiscard_rq(struct mmc_queue *mq,
 
 	from = blk_rq_pos(req);
 	nr = blk_rq_sectors(req);
+
+//ASUS_BSP Deeo : mmc suspend stress test +++
+#ifdef CONFIG_MMC_SUSPEND_TEST
+	if (card->host->suspendtest)
+             card->sectors_changed += blk_rq_sectors(req);
+#endif
+//ASUS_BSP Deeo : mmc suspend stress test ---
 
 	if (mmc_can_trim(card) && !mmc_erase_group_aligned(card, from, nr))
 		arg = MMC_SECURE_TRIM1_ARG;
@@ -1683,6 +1696,13 @@ static int mmc_blk_issue_secdiscard_rq(struct mmc_queue *mq,
 
 	from = blk_rq_pos(req);
 	nr = blk_rq_sectors(req);
+
+//ASUS_BSP Deeo : mmc suspend stress test +++
+#ifdef CONFIG_MMC_SUSPEND_TEST
+	if (card->host->suspendtest)
+             card->sectors_changed += blk_rq_sectors(req);
+#endif
+//ASUS_BSP Deeo : mmc suspend stress test ---
 
 	if (mmc_can_trim(card) && !mmc_erase_group_aligned(card, from, nr))
 		arg = MMC_SECURE_TRIM1_ARG;
@@ -2457,8 +2477,15 @@ static u8 mmc_blk_prep_packed_list(struct mmc_queue *mq, struct request *req)
 			}
 		}
 
-		if (rq_data_dir(next) == WRITE)
+		if (rq_data_dir(next) == WRITE) {
 			mq->num_of_potential_packed_wr_reqs++;
+//ASUS_BSP Deeo : mmc suspend stress test +++
+#ifdef CONFIG_MMC_SUSPENDTEST
+		if (card->host->suspendtest)
+			card->sectors_changed += blk_rq_sectors(next);
+#endif
+//ASUS_BSP Deeo : mmc suspend stress test ---
+		}
 		list_add_tail(&next->queuelist, &mqrq->packed->list);
 		cur = next;
 		reqs++;
@@ -2830,6 +2857,14 @@ static int mmc_blk_cmdq_issue_rw_rq(struct mmc_queue *mq, struct request *req)
 		    && (rq_data_dir(req) == READ))
 			active_small_sector_read = 1;
 	}
+
+//ASUS_BSP Deeo : mmc suspend stress test +++
+#ifdef CONFIG_MMC_SUSPENDTEST
+    if ((card->host->suspendtest) && (rq_data_dir(req) == WRITE))
+            card->sectors_changed += blk_rq_sectors(req);
+#endif
+//ASUS_BSP Deeo : mmc suspend stress test ---
+
 	ret = mmc_blk_cmdq_start_req(card->host, mc_rq);
 	if (!ret && active_small_sector_read)
 		host->cmdq_ctx.active_small_sector_read_reqs++;
@@ -3133,23 +3168,15 @@ static void mmc_blk_cmdq_err(struct mmc_queue *mq)
 	/* RED error - Fatal: requires reset */
 	if (mrq->cmdq_req->resp_err) {
 		err = mrq->cmdq_req->resp_err;
-		goto reset;
-	}
-
-	/*
-	 * TIMEOUT errrors can happen because of execution error
-	 * in the last command. So send cmd 13 to get device status
-	 */
-	if ((mrq->cmd && (mrq->cmd->error == -ETIMEDOUT)) ||
-			(mrq->data && (mrq->data->error == -ETIMEDOUT))) {
 		if (mmc_host_halt(host) || mmc_host_cq_disable(host)) {
 			ret = get_card_status(host->card, &status, 0);
 			if (ret)
 				pr_err("%s: CMD13 failed with err %d\n",
 						mmc_hostname(host), ret);
 		}
-		pr_err("%s: Timeout error detected with device status 0x%08x\n",
+		pr_err("%s: Response error detected with device status 0x%08x\n",
 			mmc_hostname(host), status);
+		goto reset;
 	}
 
 	/*
@@ -3281,8 +3308,15 @@ static int mmc_blk_issue_rw_rq(struct mmc_queue *mq, struct request *rqc)
 	if (!rqc && !mq->mqrq_prev->req)
 		return 0;
 
-	if (rqc)
+	if (rqc) {
+//ASUS_BSP Deeo : mmc suspend stress test +++
+#ifdef CONFIG_MMC_SUSPENDTEST
+		if ((card->host->suspendtest) && (rq_data_dir(rqc) == WRITE))
+			card->sectors_changed += blk_rq_sectors(rqc);
+#endif
+//ASUS_BSP Deeo : mmc suspend stress test ---
 		reqs = mmc_blk_prep_packed_list(mq, rqc);
+	}
 
 	do {
 		if (rqc) {
@@ -3460,7 +3494,6 @@ static inline int mmc_blk_cmdq_part_switch(struct mmc_card *card,
 	struct mmc_host *host = card->host;
 	struct mmc_cmdq_context_info *ctx = &host->cmdq_ctx;
 	u8 part_config = card->ext_csd.part_config;
-	int ret = 0, err = 0;
 
 	if ((main_md->part_curr == md->part_type) &&
 	    (card->part_curr == md->part_type))
@@ -3470,74 +3503,48 @@ static inline int mmc_blk_cmdq_part_switch(struct mmc_card *card,
 		 card->ext_csd.cmdq_support &&
 		 (md->flags & MMC_BLK_CMD_QUEUE)));
 
-	if (!test_bit(CMDQ_STATE_HALT, &ctx->curr_state)) {
-		ret = mmc_cmdq_halt(host, true);
-		if (ret) {
-			pr_err("%s: %s: halt: failed: %d\n",
-				mmc_hostname(host), __func__,  ret);
-			goto out;
-		}
-	}
+	if (!test_bit(CMDQ_STATE_HALT, &ctx->curr_state))
+		WARN_ON(mmc_cmdq_halt(host, true));
 
 	/* disable CQ mode in card */
 	if (mmc_card_cmdq(card)) {
-		ret = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
+		WARN_ON(mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
 				 EXT_CSD_CMDQ, 0,
-				 card->ext_csd.generic_cmd6_time);
-		if (ret) {
-			pr_err("%s: %s: cmdq mode disable failed %d\n",
-				mmc_hostname(host), __func__, ret);
-			goto cmdq_unhalt;
-		}
+				  card->ext_csd.generic_cmd6_time));
 		mmc_card_clr_cmdq(card);
 	}
 
 	part_config &= ~EXT_CSD_PART_CONFIG_ACC_MASK;
 	part_config |= md->part_type;
 
-	ret = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
+	WARN_ON(mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
 			 EXT_CSD_PART_CONFIG, part_config,
-			 card->ext_csd.part_time);
-	if (ret) {
-		pr_err("%s: %s: mmc_switch failure, %d -> %d , err = %d\n",
-			mmc_hostname(host), __func__, main_md->part_curr,
-			md->part_type, ret);
-		goto cmdq_switch;
-	}
+			  card->ext_csd.part_time));
 
 	card->ext_csd.part_config = part_config;
 	card->part_curr = md->part_type;
 
 	main_md->part_curr = md->part_type;
 
-cmdq_switch:
-	err = mmc_blk_cmdq_switch(card, md, true);
-	if (err) {
-		pr_err("%s: %s: mmc_blk_cmdq_switch failed: %d\n",
-			mmc_hostname(host), __func__,  err);
-		ret = err;
-	}
-cmdq_unhalt:
-	err = mmc_cmdq_halt(host, false);
-	if (err) {
-		pr_err("%s: %s: unhalt: failed: %d\n",
-			mmc_hostname(host), __func__,  err);
-		ret = err;
-	}
-out:
-	return ret;
+	WARN_ON(mmc_blk_cmdq_switch(card, md, true));
+	WARN_ON(mmc_cmdq_halt(host, false));
+
+	return 0;
 }
 
 static int mmc_blk_cmdq_issue_rq(struct mmc_queue *mq, struct request *req)
 {
-	int ret, err = 0;
+	int ret;
 	struct mmc_blk_data *md = mq->data;
 	struct mmc_card *card = md->queue.card;
-	struct mmc_host *host = card->host;
 	unsigned int cmd_flags = req ? req->cmd_flags : 0;
 
 	mmc_get_card(card);
 
+#ifdef CONFIG_MMC_BLOCK_DEFERRED_RESUME
+	if (mmc_bus_needs_resume(card->host))
+		mmc_resume_bus(card->host);
+#endif
 	if (!card->host->cmdq_ctx.active_reqs && mmc_card_doing_bkops(card)) {
 		ret = mmc_cmdq_halt(card->host, true);
 		if (ret)
@@ -3555,20 +3562,9 @@ static int mmc_blk_cmdq_issue_rq(struct mmc_queue *mq, struct request *req)
 
 	ret = mmc_blk_cmdq_part_switch(card, md);
 	if (ret) {
-		pr_err("%s: %s: partition switch failed %d, resetting cmdq\n",
+		pr_err("%s: %s: partition switch failed %d\n",
 				md->disk->disk_name, __func__, ret);
-
-		mmc_blk_cmdq_reset(host, false);
-		err = mmc_blk_cmdq_part_switch(card, md);
-		if (!err) {
-			pr_err("%s: %s: partition switch success err = %d\n",
-				md->disk->disk_name, __func__, err);
-		} else {
-			pr_err("%s: %s: partition switch failed err = %d\n",
-				md->disk->disk_name, __func__, err);
-			ret = err;
-			goto out;
-		}
+		goto out;
 	}
 
 	if (req) {
@@ -3635,6 +3631,10 @@ static int mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
 		/* claim host only for the first request */
 		mmc_get_card(card);
 
+#ifdef CONFIG_MMC_BLOCK_DEFERRED_RESUME
+	if (mmc_bus_needs_resume(card->host))
+		mmc_resume_bus(card->host);
+#endif
 		if (mmc_card_doing_bkops(host->card)) {
 			ret = mmc_stop_bkops(host->card);
 			if (ret)

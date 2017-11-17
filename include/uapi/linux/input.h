@@ -481,6 +481,17 @@ struct input_keymap_entry {
 
 #define KEY_MICMUTE		248	/* Mute / unmute the microphone */
 
+
+// BEGIN: jacob_kung@asus.com: keycode for fingerprint gestures
+#define FRINGERPRINT_SWIPE_UP 827 // 827
+#define FRINGERPRINT_SWIPE_DOWN 828 // 828
+#define FRINGERPRINT_SWIPE_LEFT 829 // 829
+#define FRINGERPRINT_SWIPE_RIGHT 830 // 830
+#define FRINGERPRINT_TAP 831 // 831
+#define FRINGERPRINT_DTAP 832 // 832
+#define FRINGERPRINT_LONGPRESS 833 // 833
+// END: jacob_kung@asus.com
+
 /* Code 255 is reserved for special needs of AT keyboard driver */
 
 #define BTN_MISC		0x100
@@ -796,7 +807,7 @@ struct input_keymap_entry {
 
 /* We avoid low common keys in module aliases so they don't get huge. */
 #define KEY_MIN_INTERESTING	KEY_MUTE
-#define KEY_MAX			0x2ff
+#define KEY_MAX			0x3ff
 #define KEY_CNT			(KEY_MAX+1)
 
 /*

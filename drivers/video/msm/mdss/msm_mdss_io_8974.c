@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1039,7 +1039,10 @@ static void mdss_dsi_8996_phy_config(struct mdss_dsi_ctrl_pdata *ctrl)
 		}
 
 		/* test str */
-		MIPI_OUTP(base + 0x14, 0x0088);	/* fixed */
+		if (g_ASUS_hwID == ZE520KL_ER1 || g_ASUS_hwID == ZE520KL_ER2)
+			MIPI_OUTP(base + 0x14, 0x0022);	/* fixed */
+		else
+			MIPI_OUTP(base + 0x14, 0x0088);	/* fixed */
 
 		/* phy timing, 8 * 5 */
 		cnt = 8;
@@ -1796,10 +1799,8 @@ static int mdss_dsi_ulps_config(struct mdss_dsi_ctrl_pdata *ctrl,
 		 * to be in stop state.
 		 */
 		MIPI_OUTP(ctrl->ctrl_base + 0x0AC, active_lanes << 16);
-		wmb(); /* ensure lanes are put to stop state */
 
 		MIPI_OUTP(ctrl->ctrl_base + 0x0AC, 0x0);
-		wmb(); /* ensure lanes are in proper state */
 
 		/*
 		 * Wait for a short duration before enabling

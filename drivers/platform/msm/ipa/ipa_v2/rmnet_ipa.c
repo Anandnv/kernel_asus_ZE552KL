@@ -33,6 +33,8 @@
 #include "ipa_qmi_service.h"
 #include <linux/rmnet_ipa_fd_ioctl.h>
 #include <linux/ipa.h>
+#include <linux/ip.h> //yujoe
+#include <linux/ipv6.h> //yujoe
 #include <uapi/linux/net_map.h>
 
 #include "ipa_trace.h"
@@ -70,10 +72,11 @@ static struct workqueue_struct *ipa_rm_q6_workqueue; /* IPA_RM workqueue*/
 static atomic_t is_initialized;
 static atomic_t is_ssr;
 static void *subsys_notify_handle;
+extern int rmnet_irq_flag_function_rx(void);//ASUS_BSP + Johnny [Qcom][PS][][ADD]Print first IP address log when IRQ 57
+extern int rmnet_irq_flag_function_rx_260(void);//ASUS_BSP + Johnny [Qcom][PS][][ADD]Print first IP address log when IRQ 260
 
 u32 apps_to_ipa_hdl, ipa_to_apps_hdl; /* get handler from ipa */
 static struct mutex ipa_to_apps_pipe_handle_guard;
-static struct mutex add_mux_channel_lock;
 static int wwan_add_ul_flt_rule_to_ipa(void);
 static int wwan_del_ul_flt_rule_to_ipa(void);
 static void ipa_wwan_msg_free_cb(void*, u32, u32);
@@ -398,15 +401,12 @@ int copy_ul_filter_rule_to_ipa(struct ipa_install_fltr_rule_req_msg_v01
 {
 	int i, j;
 
-	/* prevent multi-threads accessing num_q6_rule */
-	mutex_lock(&add_mux_channel_lock);
 	if (rule_req->filter_spec_list_valid == true) {
 		num_q6_rule = rule_req->filter_spec_list_len;
 		IPAWANDBG("Received (%d) install_flt_req\n", num_q6_rule);
 	} else {
 		num_q6_rule = 0;
 		IPAWANERR("got no UL rules from modem\n");
-		mutex_unlock(&add_mux_channel_lock);
 		return -EINVAL;
 	}
 
@@ -600,11 +600,9 @@ failure:
 	num_q6_rule = 0;
 	memset(ipa_qmi_ctx->q6_ul_filter_rule, 0,
 		sizeof(ipa_qmi_ctx->q6_ul_filter_rule));
-	mutex_unlock(&add_mux_channel_lock);
 	return -EINVAL;
 
 success:
-	mutex_unlock(&add_mux_channel_lock);
 	return 0;
 }
 
@@ -1185,15 +1183,50 @@ static void apps_ipa_packet_receive_notify(void *priv,
 	struct net_device *dev = (struct net_device *)priv;
 	int result;
 	unsigned int packet_len = skb->len;
+        //ASUS_BSP +++ Johnny [Qcom][PS][][ADD]Print first IP address log when IRQ 57
+        struct iphdr *ip4h;
+        struct ipv6hdr *ip6h;
+        unsigned char *map_payload;
+        unsigned char ip_version;
+        //ASUS_BSP --- Johnny [Qcom][PS][][ADD]Print first IP address log when IRQ 57
 
 	IPAWANDBG("Rx packet was received");
 	if (evt != IPA_RECEIVE) {
 		IPAWANERR("A none IPA_RECEIVE event in wan_ipa_receive\n");
 		return;
 	}
+        //ASUS_BSP +++ Johnny [Qcom][PS][][ADD]Print first IP address log when IRQ 57
+        map_payload = (unsigned char *)(skb->data
+                + sizeof(struct rmnet_map_header_s));
+        ip_version = (*map_payload & 0xF0) >> 4;
+        //ASUS_BSP --- Johnny [Qcom][PS][][ADD]Print first IP address log when IRQ 57
 
 	skb->dev = ipa_netdevs[0];
 	skb->protocol = htons(ETH_P_MAP);
+
+        //ASUS_BSP +++ Johnny [Qcom][PS][][ADD]Print first IP address log when IRQ 57
+        if (rmnet_irq_flag_function_rx() ==1 ){
+        	if (ip_version == 0x04){
+                        ip4h = (struct iphdr *) map_payload;
+                	pr_err_ratelimited("[data] IRQ57 First packet IP4 address src is %pI4",&ip4h->saddr);
+        	}else if (ip_version == 0x06){
+                        ip6h = (struct ipv6hdr *) map_payload;
+                	pr_err_ratelimited("[data] IRQ57 First packet IP6 address src is %pI6",&ip6h->saddr);
+                }
+        }
+         //ASUS_BSP --- Johnny [Qcom][PS][][ADD]Print first IP address log when IRQ 57
+
+        //ASUS_BSP +++ Johnny [Qcom][PS][][ADD]Print first IP address log when IRQ 260
+        if (rmnet_irq_flag_function_rx_260() ==1 ){
+                if (ip_version == 0x04){
+                        ip4h = (struct iphdr *) map_payload;
+                        pr_err_ratelimited("[data] IRQ260 First packet IP4 address src is %pI4",&ip4h->saddr);
+                }else if (ip_version == 0x06){
+                        ip6h = (struct ipv6hdr *) map_payload;
+                        pr_err_ratelimited("[data] IRQ260 First packet IP6 address src is %pI6",&ip6h->saddr);
+                }
+        }
+         //ASUS_BSP --- Johnny [Qcom][PS][][ADD]Print first IP address log when IRQ 260
 
 	if (dev->stats.rx_packets % IPA_WWAN_RX_SOFTIRQ_THRESH == 0) {
 		trace_rmnet_ipa_netifni(dev->stats.rx_packets);
@@ -1411,15 +1444,11 @@ static int ipa_wwan_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 					rmnet_mux_val.mux_id);
 				return rc;
 			}
-			mutex_lock(&add_mux_channel_lock);
 			if (rmnet_index >= MAX_NUM_OF_MUX_CHANNEL) {
 				IPAWANERR("Exceed mux_channel limit(%d)\n",
 				rmnet_index);
-				mutex_unlock(&add_mux_channel_lock);
 				return -EFAULT;
 			}
-			extend_ioctl_data.u.rmnet_mux_val.vchannel_name
-				[IFNAMSIZ-1] = '\0';
 			IPAWANDBG("ADD_MUX_CHANNEL(%d, name: %s)\n",
 			extend_ioctl_data.u.rmnet_mux_val.mux_id,
 			extend_ioctl_data.u.rmnet_mux_val.vchannel_name);
@@ -1429,9 +1458,6 @@ static int ipa_wwan_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 			memcpy(mux_channel[rmnet_index].vchannel_name,
 				extend_ioctl_data.u.rmnet_mux_val.vchannel_name,
 				sizeof(mux_channel[rmnet_index].vchannel_name));
-			mux_channel[rmnet_index].vchannel_name[
-				IFNAMSIZ - 1] = '\0';
-
 			IPAWANDBG("cashe device[%s:%d] in IPA_wan[%d]\n",
 				mux_channel[rmnet_index].vchannel_name,
 				mux_channel[rmnet_index].mux_id,
@@ -1446,7 +1472,6 @@ static int ipa_wwan_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 					IPAWANERR("device %s reg IPA failed\n",
 						extend_ioctl_data.u.
 						rmnet_mux_val.vchannel_name);
-					mutex_unlock(&add_mux_channel_lock);
 					return -ENODEV;
 				}
 				mux_channel[rmnet_index].mux_channel_set = true;
@@ -1459,7 +1484,6 @@ static int ipa_wwan_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 				mux_channel[rmnet_index].ul_flt_reg = false;
 			}
 			rmnet_index++;
-			mutex_unlock(&add_mux_channel_lock);
 			break;
 		case RMNET_IOCTL_SET_EGRESS_DATA_FORMAT:
 			IPAWANDBG("get RMNET_IOCTL_SET_EGRESS_DATA_FORMAT\n");
@@ -1506,12 +1530,9 @@ static int ipa_wwan_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 				/* already got Q6 UL filter rules*/
 				if (ipa_qmi_ctx &&
 					ipa_qmi_ctx->modem_cfg_emb_pipe_flt
-					== false) {
-					/* protect num_q6_rule */
-					mutex_lock(&add_mux_channel_lock);
+					== false)
 					rc = wwan_add_ul_flt_rule_to_ipa();
-					mutex_unlock(&add_mux_channel_lock);
-				} else
+				else
 					rc = 0;
 				egress_set = true;
 				if (rc)
@@ -2485,9 +2506,6 @@ int rmnet_ipa_set_data_quota(struct wan_ioctl_set_data_quota *data)
 	int index;
 	struct ipa_set_data_usage_quota_req_msg_v01 req;
 
-	/* prevent string buffer overflows */
-	data->interface_name[IFNAMSIZ-1] = '\0';
-
 	index = find_vchannel_name_index(data->interface_name);
 	IPAWANERR("iface name %s, quota %lu\n",
 			  data->interface_name,
@@ -2521,30 +2539,13 @@ int rmnet_ipa_set_data_quota(struct wan_ioctl_set_data_quota *data)
  *
  * Return codes:
  * 0: Success
- * -EFAULT: Invalid src/dst pipes provided
+ * -EFAULT: Invalid interface name provided
  * other: See ipa_qmi_set_data_quota
  */
 int rmnet_ipa_set_tether_client_pipe(
 	struct wan_ioctl_set_tether_client_pipe *data)
 {
 	int number, i;
-
-	/* error checking if ul_src_pipe_len valid or not*/
-	if (data->ul_src_pipe_len > QMI_IPA_MAX_PIPES_V01 ||
-		data->ul_src_pipe_len < 0) {
-		IPAWANERR("UL src pipes %d exceeding max %d\n",
-			data->ul_src_pipe_len,
-			QMI_IPA_MAX_PIPES_V01);
-		return -EFAULT;
-	}
-	/* error checking if dl_dst_pipe_len valid or not*/
-	if (data->dl_dst_pipe_len > QMI_IPA_MAX_PIPES_V01 ||
-		data->dl_dst_pipe_len < 0) {
-		IPAWANERR("DL dst pipes %d exceeding max %d\n",
-			data->dl_dst_pipe_len,
-			QMI_IPA_MAX_PIPES_V01);
-		return -EFAULT;
-	}
 
 	IPAWANDBG("client %d, UL %d, DL %d, reset %d\n",
 	data->ipa_client,
@@ -2582,11 +2583,6 @@ int rmnet_ipa_query_tethering_stats(struct wan_ioctl_query_tether_stats *data,
 	struct ipa_get_data_stats_req_msg_v01 *req;
 	struct ipa_get_data_stats_resp_msg_v01 *resp;
 	int pipe_len, rc;
-
-	if (data != NULL) {
-		data->upstreamIface[IFNAMSIZ-1] = '\0';
-		data->tetherIface[IFNAMSIZ-1] = '\0';
-	}
 
 	req = kzalloc(sizeof(struct ipa_get_data_stats_req_msg_v01),
 			GFP_KERNEL);
@@ -2818,7 +2814,6 @@ static int __init ipa_wwan_init(void)
 	atomic_set(&is_ssr, 0);
 
 	mutex_init(&ipa_to_apps_pipe_handle_guard);
-	mutex_init(&add_mux_channel_lock);
 	ipa_to_apps_hdl = -1;
 
 	ipa_qmi_init();
@@ -2837,7 +2832,6 @@ static void __exit ipa_wwan_cleanup(void)
 	int ret;
 	ipa_qmi_cleanup();
 	mutex_destroy(&ipa_to_apps_pipe_handle_guard);
-	mutex_destroy(&add_mux_channel_lock);
 	ret = subsys_notif_unregister_notifier(subsys_notify_handle,
 					&ssr_notifier);
 	if (ret)

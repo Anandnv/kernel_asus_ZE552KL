@@ -750,6 +750,9 @@ struct dwc3_scratchpad_array {
 #define DWC3_CONTROLLER_SET_CURRENT_DRAW_EVENT		10
 #define DWC3_CONTROLLER_RESTART_USB_SESSION		11
 #define DWC3_CONTROLLER_NOTIFY_DISABLE_UPDXFER		12
+#if defined(CONFIG_UNKNOWN_CHARGER)
+#define DWC3_CONTROLLER_NOTIFY_RESET        13
+#endif
 
 #define MAX_INTR_STATS					10
 /**
@@ -947,6 +950,7 @@ struct dwc3 {
 	unsigned		pullups_connected:1;
 	unsigned		resize_fifos:1;
 	unsigned		setup_packet_pending:1;
+	unsigned		start_config_issued:1;
 	unsigned		three_stage_setup:1;
 	unsigned		is_drd:1;
 

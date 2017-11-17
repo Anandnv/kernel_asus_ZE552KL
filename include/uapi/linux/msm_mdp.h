@@ -71,6 +71,10 @@
 #define MSMFB_MDP_PP_GET_FEATURE_VERSION _IOWR(MSMFB_IOCTL_MAGIC, 171, \
 					      struct mdp_pp_feature_version)
 
+// ASUS BSP Display +++
+#define MSMFB_CABC_CTRL _IOW(MSMFB_IOCTL_MAGIC, 171, unsigned int)
+// ASUS BSP Display ---
+
 #define FB_TYPE_3D_PANEL 0x10101010
 #define MDP_IMGTYPE2_START 0x10000
 #define MSMFB_DRIVER_VERSION	0xF9E8D701
@@ -114,6 +118,15 @@
 #define MDSS_MDP_HW_REV_116	MDSS_MDP_REV(1, 16, 0) /* msm8953 */
 #define MDSS_MDP_HW_REV_300	MDSS_MDP_REV(3, 0, 0)  /* msmcobalt */
 #define MDSS_MDP_HW_REV_301	MDSS_MDP_REV(3, 0, 1)  /* msmcobalt v1.0 */
+
+//ASUS BSP Display, cabc mode +++
+enum {
+	OFF_MODE = 0x0,
+	UI_MODE,
+	Still_MODE,
+	Moving_MODE,
+};
+//ASUS BSP Display, cabc mode ---
 
 enum {
 	NOTIFY_UPDATE_INIT,
@@ -1368,20 +1381,11 @@ enum {
 	MDP_WRITEBACK_MIRROR_RESUME,
 };
 
-/*
- * The enum values are continued below as preprocessor macro definitions
- */
 enum mdp_color_space {
 	MDP_CSC_ITU_R_601,
 	MDP_CSC_ITU_R_601_FR,
 	MDP_CSC_ITU_R_709,
 };
-
-/*
- * These definitions are a continuation of the mdp_color_space enum above
- */
-#define MDP_CSC_ITU_R_2020	(MDP_CSC_ITU_R_709 + 1)
-#define MDP_CSC_ITU_R_2020_FR	(MDP_CSC_ITU_R_2020 + 1)
 
 enum {
 	mdp_igc_v1_7 = 1,

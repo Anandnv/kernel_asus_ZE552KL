@@ -72,6 +72,10 @@ struct msm_pinctrl {
 	void __iomem *regs;
 };
 
+//[+++][Power]Add for GPIO wakeup debug
+int gpio_irq_cnt, gpio_resume_irq[8];
+//[---][Power]Add for GPIO wakeup debug
+
 static struct msm_pinctrl *msm_pinctrl_data;
 
 static inline struct msm_pinctrl *to_msm_pinctrl(struct gpio_chip *gc)
@@ -531,12 +535,35 @@ static void msm_gpio_dbg_show_one(struct seq_file *s,
 	seq_printf(s, " %s", pulls[pull]);
 }
 
+/* ASUS_BSP Freddy +++ To prevent system crash, Apps will not have access to gpio 135~138 used by TZ*/
+static int is_tz_gpio(unsigned gpio)
+{
+	switch (gpio) {
+/*	case 0:
+	case 1:
+	case 2:
+	case 3:*/
+	case 135:
+	case 136:
+	case 137:
+	case 138:
+		return 1;
+	default:
+		return 0;
+	}
+}
+/* ASUS_BSP Freddy --- */
+
 static void msm_gpio_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 {
 	unsigned gpio = chip->base;
 	unsigned i;
 
 	for (i = 0; i < chip->ngpio; i++, gpio++) {
+		/* ASUS_BSP Freddy +++ To prevent system crash, Apps will not have access to gpio 135~138 used by TZ*/
+		if (is_tz_gpio(gpio))
+			continue;
+		/* ASUS_BSP Freddy --- */
 		msm_gpio_dbg_show_one(s, NULL, chip, i, gpio);
 		seq_puts(s, "\n");
 	}
@@ -809,7 +836,6 @@ static void msm_gpio_irq_handler(unsigned int irq, struct irq_desc *desc)
 	int i;
 
 	chained_irq_enter(chip, desc);
-
 	/*
 	 * Each pin has it's own IRQ status register, so use
 	 * enabled_irq bitmap to limit the number of reads.
@@ -823,7 +849,6 @@ static void msm_gpio_irq_handler(unsigned int irq, struct irq_desc *desc)
 			handled++;
 		}
 	}
-
 	/* No interrupts were flagged */
 	if (handled == 0)
 		handle_bad_irq(irq, desc);
@@ -939,7 +964,7 @@ static int msm_pinctrl_suspend(void)
 
 static void msm_pinctrl_resume(void)
 {
-	int i, irq;
+	int i, irq, j;
 	u32 val;
 	unsigned long flags;
 	struct irq_desc *desc;
@@ -949,6 +974,11 @@ static void msm_pinctrl_resume(void)
 
 	if (!msm_show_resume_irq_mask)
 		return;
+	//[+++]Add GPIO wakeup information
+	for(j = 0; j < 8; j++)
+		gpio_resume_irq[j] = 0;
+	gpio_irq_cnt=0;
+	//[---]Add GPIO wakeup information
 
 	spin_lock_irqsave(&pctrl->lock, flags);
 	for_each_set_bit(i, pctrl->enabled_irqs, pctrl->chip.ngpio) {
@@ -963,8 +993,13 @@ static void msm_pinctrl_resume(void)
 				name = desc->action->name;
 
 			pr_warn("%s: %d triggered %s\n", __func__, irq, name);
+			if(gpio_irq_cnt < 8)
+				gpio_resume_irq[gpio_irq_cnt]=(unsigned int)irq;
+			gpio_irq_cnt++;
 		}
 	}
+	if(gpio_irq_cnt >= 8)
+		gpio_irq_cnt = 7;
 	spin_unlock_irqrestore(&pctrl->lock, flags);
 }
 #else

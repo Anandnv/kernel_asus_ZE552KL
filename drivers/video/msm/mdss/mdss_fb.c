@@ -75,6 +75,18 @@
 #define BLANK_FLAG_ULP	FB_BLANK_NORMAL
 #endif
 
+//austin+++
+#define COMMIT_FRAMES_COUNT 5
+int display_commit_cnt = COMMIT_FRAMES_COUNT;
+u32 g_update_bl = 0; /* ASUS BSP Display, to record bl level from HAL*/
+extern void set_tcon_cmd(char *cmd, short len);
+extern char cabc_mode[2];
+extern char dimming_cmd[2];
+extern char ctc_bl_cmd[3];
+extern char tm_bl_cmd[2];
+extern int g_ftm_mode;
+//austin---
+
 static struct fb_info *fbi_list[MAX_FBI_LIST];
 static int fbi_list_index;
 
@@ -550,13 +562,7 @@ static ssize_t mdss_fb_get_panel_info(struct device *dev,
 			"min_w=%d\nmin_h=%d\nroi_merge=%d\ndyn_fps_en=%d\n"
 			"min_fps=%d\nmax_fps=%d\npanel_name=%s\n"
 			"primary_panel=%d\nis_pluggable=%d\ndisplay_id=%s\n"
-			"is_cec_supported=%d\nis_pingpong_split=%d\n"
-			"is_hdr_enabled=%d\n"
-			"peak_brightness=%d\nblackness_level=%d\n"
-			"white_chromaticity_x=%d\nwhite_chromaticity_y=%d\n"
-			"red_chromaticity_x=%d\nred_chromaticity_y=%d\n"
-			"green_chromaticity_x=%d\ngreen_chromaticity_y=%d\n"
-			"blue_chromaticity_x=%d\nblue_chromaticity_y=%d\n",
+			"is_cec_supported=%d\nis_pingpong_split=%d\n",
 			pinfo->partial_update_enabled,
 			pinfo->roi_alignment.xstart_pix_align,
 			pinfo->roi_alignment.width_pix_align,
@@ -568,18 +574,7 @@ static ssize_t mdss_fb_get_panel_info(struct device *dev,
 			pinfo->dynamic_fps, pinfo->min_fps, pinfo->max_fps,
 			pinfo->panel_name, pinfo->is_prim_panel,
 			pinfo->is_pluggable, pinfo->display_id,
-			pinfo->is_cec_supported, is_pingpong_split(mfd),
-			pinfo->hdr_properties.hdr_enabled,
-			pinfo->hdr_properties.peak_brightness,
-			pinfo->hdr_properties.blackness_level,
-			pinfo->hdr_properties.display_primaries[0],
-			pinfo->hdr_properties.display_primaries[1],
-			pinfo->hdr_properties.display_primaries[2],
-			pinfo->hdr_properties.display_primaries[3],
-			pinfo->hdr_properties.display_primaries[4],
-			pinfo->hdr_properties.display_primaries[5],
-			pinfo->hdr_properties.display_primaries[6],
-			pinfo->hdr_properties.display_primaries[7]);
+			pinfo->is_cec_supported, is_pingpong_split(mfd));
 
 	return ret;
 }
@@ -1569,7 +1564,8 @@ void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl)
 		} else {
 			if (mfd->bl_level != bkl_lvl)
 				bl_notify_needed = true;
-			pr_debug("backlight sent to panel :%d\n", temp);
+            pr_debug("backlight sent to panel :%d\n", temp);
+            g_update_bl = temp;
 			pdata->set_backlight(pdata, temp);
 			mfd->bl_level = bkl_lvl;
 			mfd->bl_level_scaled = temp;
@@ -1603,7 +1599,8 @@ void mdss_fb_update_backlight(struct msm_fb_data_type *mfd)
 			if (bl_notify)
 				mdss_fb_bl_update_notify(mfd,
 					NOTIFY_TYPE_BL_AD_ATTEN_UPDATE);
-			mdss_fb_bl_update_notify(mfd, NOTIFY_TYPE_BL_UPDATE);
+            mdss_fb_bl_update_notify(mfd, NOTIFY_TYPE_BL_UPDATE);
+            g_update_bl = temp;
 			pdata->set_backlight(pdata, temp);
 			mfd->bl_level_scaled = mfd->unset_bl_level;
 			mfd->allow_bl_update = true;
@@ -1900,6 +1897,9 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 		req_power_state = MDSS_PANEL_POWER_OFF;
 		pr_debug("blank powerdown called\n");
 		ret = mdss_fb_blank_blank(mfd, req_power_state);
+		//austin+++
+		display_commit_cnt = COMMIT_FRAMES_COUNT;
+		//austin---
 		break;
 	}
 
@@ -3239,10 +3239,6 @@ int mdss_fb_atomic_commit(struct fb_info *info,
 				MSMFB_ATOMIC_COMMIT, true, false);
 			if (mfd->panel.type == WRITEBACK_PANEL) {
 				output_layer = commit_v1->output_layer;
-				if (!output_layer) {
-					pr_err("Output layer is null\n");
-					goto end;
-				}
 				wb_change = !mdss_fb_is_wb_config_same(mfd,
 						commit_v1->output_layer);
 				if (wb_change) {
@@ -3291,6 +3287,11 @@ int mdss_fb_atomic_commit(struct fb_info *info,
 
 	if (wait_for_finish)
 		ret = mdss_fb_pan_idle(mfd);
+
+	if (display_commit_cnt > 0) {
+       		 printk("fb%d dpc\n", info->node);
+        	 display_commit_cnt--;
+    }
 
 end:
 	if (ret && (mfd->panel.type == WRITEBACK_PANEL) && wb_change)
@@ -4185,10 +4186,11 @@ static int mdss_fb_handle_buf_sync_ioctl(struct msm_sync_pt_data *sync_pt_data,
 		goto buf_sync_err_3;
 	}
 
-	sync_fence_install(rel_fence, rel_fen_fd);
 	sync_fence_install(retire_fence, retire_fen_fd);
 
 skip_retire_fence:
+	sync_fence_install(rel_fence, rel_fen_fd);
+
 	mutex_unlock(&sync_pt_data->sync_mutex);
 
 	if (buf_sync->flags & MDP_BUF_SYNC_FLAG_WAIT)
@@ -4339,22 +4341,11 @@ static int mdss_fb_atomic_commit_ioctl(struct fb_info *info,
 	struct mdp_input_layer __user *input_layer_list;
 	struct mdp_output_layer *output_layer = NULL;
 	struct mdp_output_layer __user *output_layer_user;
-	struct msm_fb_data_type *mfd;
 
 	ret = copy_from_user(&commit, argp, sizeof(struct mdp_layer_commit));
 	if (ret) {
 		pr_err("%s:copy_from_user failed\n", __func__);
 		return ret;
-	}
-
-	mfd = (struct msm_fb_data_type *)info->par;
-	if (!mfd)
-		return -EINVAL;
-
-	if (mfd->panel_info->panel_dead) {
-		pr_debug("early commit return\n");
-		MDSS_XLOG(mfd->panel_info->panel_dead);
-		return 0;
 	}
 
 	output_layer_user = commit.commit_v1.output_layer;
@@ -4585,15 +4576,6 @@ static int __ioctl_wait_idle(struct msm_fb_data_type *mfd, u32 cmd)
 	return ret;
 }
 
-static bool check_not_supported_ioctl(u32 cmd)
-{
-	return((cmd == MSMFB_OVERLAY_SET) || (cmd == MSMFB_OVERLAY_UNSET) ||
-		(cmd == MSMFB_OVERLAY_GET) || (cmd == MSMFB_OVERLAY_PREPARE) ||
-		(cmd == MSMFB_DISPLAY_COMMIT) || (cmd == MSMFB_OVERLAY_PLAY) ||
-		(cmd == MSMFB_BUFFER_SYNC) || (cmd == MSMFB_OVERLAY_QUEUE) ||
-		(cmd == MSMFB_NOTIFY_UPDATE));
-}
-
 /*
  * mdss_fb_do_ioctl() - MDSS Framebuffer ioctl function
  * @info:	pointer to framebuffer info
@@ -4613,6 +4595,7 @@ int mdss_fb_do_ioctl(struct fb_info *info, unsigned int cmd,
 	struct mdp_buf_sync buf_sync;
 	unsigned int dsi_mode = 0;
 	struct mdss_panel_data *pdata = NULL;
+	int panel_cabc_mode = Still_MODE;	// ASUS BSP Display +++
 
 	if (!info || !info->par)
 		return -EINVAL;
@@ -4627,11 +4610,6 @@ int mdss_fb_do_ioctl(struct fb_info *info, unsigned int cmd,
 	pdata = dev_get_platdata(&mfd->pdev->dev);
 	if (!pdata || pdata->panel_info.dynamic_switch_pending)
 		return -EPERM;
-
-	if (check_not_supported_ioctl(cmd)) {
-		pr_err("Unsupported ioctl\n");
-		return -EINVAL;
-	}
 
 	atomic_inc(&mfd->ioctl_ref_cnt);
 
@@ -4673,6 +4651,22 @@ int mdss_fb_do_ioctl(struct fb_info *info, unsigned int cmd,
 	case MSMFB_DISPLAY_COMMIT:
 		ret = mdss_fb_display_commit(info, argp);
 		break;
+
+	// ASUS BSP Display +++
+	case MSMFB_CABC_CTRL:
+		ret = copy_from_user(&panel_cabc_mode, argp, sizeof(panel_cabc_mode));
+		if (ret) {
+			pr_err("%s: CABC mode(%d) set failed\n", __func__, panel_cabc_mode);
+			goto exit;
+		}
+		if (g_ftm_mode) {
+			pr_err("[Display] Factory mode: CABC isn't allow to set\n");
+			break;
+		}
+        cabc_mode[1] = panel_cabc_mode;
+        set_tcon_cmd(cabc_mode, ARRAY_SIZE(cabc_mode));
+		break;
+	// ASUS BSP Display ---
 
 	case MSMFB_LPM_ENABLE:
 		ret = copy_from_user(&dsi_mode, argp, sizeof(dsi_mode));
