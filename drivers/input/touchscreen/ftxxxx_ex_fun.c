@@ -41,14 +41,8 @@ static unsigned char JT_AUO_FW[] = {
 static unsigned char GIS_TM_FW[] = {
 #include "ASUS_ZE552KL_GIS_TM_app.i"
 };*/
-static unsigned char aucFW_PRAM_BOOT[] = {
-	#include "ASUS_LIBRA_GIS_CTC_app.i"
-};
 /**/
-/*static unsigned char GIS_CTC_FW[] = {
-#include "ASUS_LIBRA_GIS_CTC_app.i"
-};
-static unsigned char GIS_TM1_FW[] = {
+/*static unsigned char GIS_TM1_FW[] = {
 #include "ASUS_LIBRA_GIS_TM_app.i"
 };
 static unsigned char BIEL_CTC_FW[] = {
@@ -62,9 +56,6 @@ static unsigned char JT_TM1_FW[] = {
 };
 */
 
-static unsigned char TP_5446_FW[] = {
-#include "ASUS_ZE552KL_5446_app.i"
-};
 /**/
 
 /*ASUS_BSP Jacob : setting priority +++ */
